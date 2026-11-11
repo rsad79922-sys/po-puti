@@ -10,12 +10,31 @@
   <link rel="manifest" href="./manifest.webmanifest">
   <link rel="icon" href="./icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="./icons/icon-192.png">
-  <link rel="stylesheet" href="./styles.css">
+  <link rel="stylesheet" href="./styles.css?v=mobile4">
   <title>По пути — едем вместе</title>
 </head>
 <body>
-  <div id="app"></div>
+  <div id="app"><main style="padding:28px 20px;font-family:system-ui,-apple-system,sans-serif;color:#141b3b"><h1 style="font-size:24px">По пути</h1><p>Загружаем приложение…</p></main></div>
+  <script>
+    (function(){
+      var failure=false;
+      window.poPutiLoadError=function(message){
+        failure=true;
+        var root=document.getElementById('app');
+        if(root) root.innerHTML='<main style="padding:28px 20px;font-family:system-ui,-apple-system,sans-serif;color:#141b3b"><h2>Не удалось открыть «По пути»</h2><p>'+String(message||'Ошибка загрузки страницы').replace(/[<>&]/g,'')+'</p><p><a href="/?refresh=mobile4" style="color:#087d77">Повторить загрузку</a></p></main>';
+      };
+      window.addEventListener('error',function(event){
+        if(event && event.filename && /app\\.js/.test(event.filename))window.poPutiLoadError('Ошибка запуска интерфейса. Попробуйте обновить страницу.');
+      });
+      window.addEventListener('load',function(){
+        setTimeout(function(){
+          var root=document.getElementById('app');
+          if(!failure && root && root.textContent.indexOf('Загружаем приложение')!==-1)window.poPutiLoadError('Интерфейс не загрузился. Проверьте соединение и повторите.');
+        },9000);
+      });
+    })();
+  </script>
   <script src="./config.js"></script>
-  <script src="./app.js" defer></script>
+  <script src="./app.js?v=mobile4" defer onerror="window.poPutiLoadError&&window.poPutiLoadError('Не удалось загрузить файл приложения. Проверьте подключение и обновите страницу.')"></script>
 </body>
 </html>
