@@ -1,0 +1,49 @@
+name: API smoke tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check JavaScript syntax
+        run: |
+          node --check server/server.mjs
+          node --check www/app.js
+          node --check tests/smoke-api.mjs
+      - name: Run cross-platform API smoke test
+        shell: bash
+        run: |
+          set -euo pipefail
+          export DATA_DIR="${RUNNER_TEMP}/po-puti-test-data"
+          export HOST=127.0.0.1
+          export PORT=8080
+          node server/server.mjs > "${RUNNER_TEMP}/po-puti-server.log" 2>&1 &
+          SERVER_PID=$!
+          trap 'kill "$SERVER_PID" 2>/dev/null || true' EXIT
+          ready=0
+          for attempt in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:8080/ > /dev/null; then
+              ready=1
+              break
+            fi
+            sleep 1
+          done
+          if [ "$ready" -ne 1 ]; then
+            cat "${RUNNER_TEMP}/po-puti-server.log"
+            exit 1
+          fi
+          node tests/smoke-api.mjs
