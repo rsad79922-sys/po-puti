@@ -1,0 +1,21 @@
+{
+  "name": "po-puti-pwa-android-prototype",
+  "version": "0.2.0",
+  "private": true,
+  "description": "Рабочий локальный прототип приложения По пути для Android и PWA",
+  "scripts": {
+    "serve": "npx http-server www -p 8080 -c-1",
+    "android:add": "npx cap add android",
+    "android:sync": "npx cap sync android",
+    "android:open": "npx cap open android",
+    "server": "node server/server.mjs"
+  },
+  "dependencies": {
+    "@capacitor/core": "^7.0.0",
+    "@capacitor/android": "^7.0.0"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^7.0.0",
+    "http-server": "^14.1.1"
+  }
+}

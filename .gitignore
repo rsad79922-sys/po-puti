@@ -1,0 +1,14 @@
+node_modules/
+android/
+server-data/
+.env
+.env.*
+!.env.example
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.jks
+*.keystore
+*.pem
+.DS_Store
+*.log

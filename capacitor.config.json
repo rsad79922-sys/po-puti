@@ -1,0 +1,6 @@
+{
+  "appId": "ru.poputi.app",
+  "appName": "По пути",
+  "webDir": "www",
+  "server": {"androidScheme": "https"}
+}
