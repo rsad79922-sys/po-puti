@@ -2,10 +2,11 @@
 /* ПО ПУТИ v0.2 — локальная демоверсия и клиент единого API для Android + PWA. */
 const STORE = 'po-puti-prototype-v2';
 const TOKEN_STORE = 'po-puti-access-v2';
+const safeStorage = {getItem(key){try{return localStorage.getItem(key)}catch{return null}},setItem(key,value){try{localStorage.setItem(key,value)}catch{}}};
 const DEMO_HASH_SALT = 'po-puti-demo-v2:';
 const SERVER_BASE = (window.PO_PUTI_API_BASE || '').replace(/\/$/, '');
 let remoteMode = window.PO_PUTI_BACKEND === true || !!window.PO_PUTI_API_BASE;
-let accessToken = localStorage.getItem(TOKEN_STORE) || '';
+let accessToken = safeStorage.getItem(TOKEN_STORE) || '';
 let adminData = null;
 let serverError = '';
 let accountTab = 'login';
@@ -232,5 +233,5 @@ window.addEventListener('offline',()=>render());
 setInterval(()=>{if(remoteMode&&accessToken&&navigator.onLine&&document.visibilityState==='visible'&&!document.querySelector('.overlay')&&!['INPUT','TEXTAREA','SELECT'].includes(document.activeElement?.tagName))refreshRemote()},15000);
 window.addEventListener('focus',()=>{if(remoteMode&&accessToken&&navigator.onLine)refreshRemote()});
 window.addEventListener('storage',event=>{if(event.key===STORE){try{db=JSON.parse(event.newValue)||seed();render()}catch{}}});
-if(!location.hash)location.hash='/search';if(remoteMode){const localUI=JSON.parse(localStorage.getItem('po-puti-ui-v2')||'{}');db={currentUserId:null,users:[],rides:[],requests:[],notifications:[],reviews:[],messages:[],reports:[],search:localUI.search||{from:'Москва',to:'Санкт-Петербург',date:today(1)},searchSubmitted:true,draft:localUI.draft||null};if(accessToken)refreshRemote();else{navigate('/login');render()}}else{save();render()};
+if(!location.hash)location.hash='/search';if(remoteMode){let localUI={};try{localUI=JSON.parse(safeStorage.getItem('po-puti-ui-v2')||'{}')}catch{localUI={}};db={currentUserId:null,users:[],rides:[],requests:[],notifications:[],reviews:[],messages:[],reports:[],search:localUI.search||{from:'Москва',to:'Санкт-Петербург',date:today(1)},searchSubmitted:true,draft:localUI.draft||null};if(accessToken)refreshRemote();else{navigate('/login');render()}}else{save();render()};
 if('serviceWorker' in navigator && location.protocol!=='file:' && !window.Capacitor){window.addEventListener('load',()=>navigator.serviceWorker.register('./sw.js').catch(()=>{}))}
