@@ -92,7 +92,28 @@ function handleApi(req,path,data){const method=req.method;
  const actor=requireActor(req);
  if(path==='/api/state'&&method==='GET')return state(actor);
  if(path==='/api/logout'&&method==='POST'){const token=(req.headers.authorization||'').slice(7);run('DELETE FROM sessions WHERE token_hash=?',sha(token));return {ok:true}}
- if(path==='/api/profile'&&method==='POST'){const name=clean(data.name,60),car=clean(data.car,90),phone=clean(data.phone,24);if(!name)throw jsonError('Укажите имя');if(phone&&!/^[+\d ()-]{7,24}$/.test(phone))throw jsonError('Неверный формат телефона');run('UPDATE users SET name=?,car=?,phone=? WHERE id=?',name,car,phone,actor.id);return {ok:true}}
+ if(path==='/api/profile'&&method==='POST'){
+   const name=clean(data.name,60),car=clean(data.car,90),phone=clean(data.phone,24);
+   if(!name)throw jsonError('Укажите имя');
+   if(phone&&!/^[+\\d ()-]{7,24}$/.test(phone))throw jsonError('Неверный формат телефона');
+   let photo=actor.photo||'';
+   if(Object.hasOwn(data,'photo')){
+     if(data.photo==='') photo='';
+     else {
+       if(typeof data.photo!=='string'||data.photo.length>410000)throw jsonError('Слишком большое фото (максимум 300 КБ)',413);
+       const match=data.photo.match(/^data:image\\/(jpeg|png|webp);base64,([A-Za-z0-9+/]+={0,2})$/);
+       if(!match)throw jsonError('Допустимы только JPEG, PNG или WebP');
+       const bytes=Buffer.from(match[2],'base64');
+       if(!bytes.length||bytes.length>300000||bytes.toString('base64')!==match[2])throw jsonError('Некорректное фото или превышен размер 300 КБ',413);
+       const jpg=match[1]==='jpeg'&&bytes[0]===0xff&&bytes[1]===0xd8;
+       const png=match[1]==='png'&&bytes.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10]));
+       const webp=match[1]==='webp'&&bytes.toString('ascii',0,4)==='RIFF'&&bytes.toString('ascii',8,12)==='WEBP';
+       if(!jpg&&!png&&!webp)throw jsonError('Формат изображения не соответствует файлу');
+       photo=data.photo;
+     }
+   }
+   run('UPDATE users SET name=?,car=?,phone=?,photo=? WHERE id=?',name,car,phone,photo,actor.id);return {ok:true};
+ }
  if(path==='/api/rides'&&method==='POST'){
    const from=clean(data.from,100),to=clean(data.to,100),date=clean(data.date,10),time=clean(data.time,5),car=clean(data.car,90);
    const seats=Number(data.seats),price=data.negotiable?null:Number(data.price);
