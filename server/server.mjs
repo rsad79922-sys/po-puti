@@ -46,6 +46,12 @@ const saltHash = (password,salt) => crypto.scryptSync(password,salt,64,{N:32768,
 const jsonError=(message,status=400)=>Object.assign(new Error(message),{status});
 const allowedOrigins = new Set((process.env.APP_ORIGINS||'https://localhost,capacitor://localhost,http://localhost:8080').split(',').map(v=>v.trim()).filter(Boolean));
 const limit = new Map();
+function clientIp(req){
+ const peer = req.socket.remoteAddress || '';
+ const forwarded = String(req.headers['x-real-ip'] || '');
+ const localProxy = ['127.0.0.1','::1','::ffff:127.0.0.1'].includes(peer);
+ return localProxy && /^[0-9a-fA-F:.]{3,45}$/.test(forwarded) ? forwarded : peer;
+}
 function checkRate(ip){const t=Date.now(),r=limit.get(ip)||{start:t,count:0};if(t-r.start>15*60_000){r.start=t;r.count=0;}r.count++;limit.set(ip,r);if(r.count>55)throw jsonError('Слишком много попыток. Повторите позже.',429);}
 function notify(recipient,title,message,rideId=''){run('INSERT INTO notifications VALUES(?,?,?,?,?,?,?)',uid(),recipient,title,message,rideId,0,now());}
 function transaction(fn){database.exec('BEGIN IMMEDIATE');try{const val=fn();database.exec('COMMIT');return val}catch(err){database.exec('ROLLBACK');throw err}}
@@ -72,13 +78,13 @@ function cancelRide(ride,actor,asAdmin=false){if(ride.driver_id!==actor.id&&!asA
 function handleApi(req,path,data){const method=req.method;
  if(path==='/api/health' && method==='GET')return {ok:true,backend:'sqlite',version:'0.2'};
  if(path==='/api/register' && method==='POST'){
-   checkRate(req.socket.remoteAddress||'');const uname=clean(data.username,33).toLowerCase();if(!usernameValid(uname)||!passwordValid(data.password))throw jsonError('Логин должен содержать 3–32 символа, пароль — не менее 8');
+   checkRate(clientIp(req));const uname=clean(data.username,33).toLowerCase();if(!usernameValid(uname)||!passwordValid(data.password))throw jsonError('Логин должен содержать 3–32 символа, пароль — не менее 8');
    if(q('SELECT id FROM users WHERE username=?',uname))throw jsonError('Этот логин уже занят',409);
    const id=uid(),salt=crypto.randomBytes(20).toString('hex');try{run('INSERT INTO users(id,username,salt,hash,name,role,created) VALUES(?,?,?,?,?,?,?)',id,uname,salt,saltHash(data.password,salt),uname,'user',now())}catch{throw jsonError('Не удалось создать аккаунт',409)}
    return loggedIn(q('SELECT * FROM users WHERE id=?',id));
  }
  if(path==='/api/login' && method==='POST'){
-   checkRate(req.socket.remoteAddress||'');const uname=clean(data.username,33).toLowerCase();const user=q('SELECT * FROM users WHERE username=?',uname);
+   checkRate(clientIp(req));const uname=clean(data.username,33).toLowerCase();const user=q('SELECT * FROM users WHERE username=?',uname);
    const salt=user?.salt||'no-user-salt',expected=user?.hash||'0'.repeat(128),actual=saltHash(String(data.password||''),salt);
    if(!user||!crypto.timingSafeEqual(Buffer.from(expected,'hex'),Buffer.from(actual,'hex')))throw jsonError('Неверный логин или пароль',401);
    return loggedIn(user);
