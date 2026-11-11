@@ -95,13 +95,13 @@ function handleApi(req,path,data){const method=req.method;
  if(path==='/api/profile'&&method==='POST'){
    const name=clean(data.name,60),car=clean(data.car,90),phone=clean(data.phone,24);
    if(!name)throw jsonError('Укажите имя');
-   if(phone&&!/^[+\\d ()-]{7,24}$/.test(phone))throw jsonError('Неверный формат телефона');
+   if(phone&&!/^[+\d ()-]{7,24}$/.test(phone))throw jsonError('Неверный формат телефона');
    let photo=actor.photo||'';
    if(Object.hasOwn(data,'photo')){
      if(data.photo==='') photo='';
      else {
        if(typeof data.photo!=='string'||data.photo.length>410000)throw jsonError('Слишком большое фото (максимум 300 КБ)',413);
-       const match=data.photo.match(/^data:image\\/(jpeg|png|webp);base64,([A-Za-z0-9+/]+={0,2})$/);
+       const match=data.photo.match(/^data:image\/(jpeg|png|webp);base64,([A-Za-z0-9+/]+={0,2})$/);
        if(!match)throw jsonError('Допустимы только JPEG, PNG или WebP');
        const bytes=Buffer.from(match[2],'base64');
        if(!bytes.length||bytes.length>300000||bytes.toString('base64')!==match[2])throw jsonError('Некорректное фото или превышен размер 300 КБ',413);
