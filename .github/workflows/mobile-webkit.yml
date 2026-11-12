@@ -2,7 +2,7 @@ name: Mobile WebKit startup
 
 on:
   push:
-    branches: [main]
+    branches: [main, audit/fix-mobile-runtime-20261112]
     paths:
       - 'www/**'
       - 'server/**'
@@ -46,3 +46,5 @@ jobs:
         run: node tests/mobile-startup.mjs
       - name: Run real WebKit iPhone-sized browser smoke
         run: node tests/browser-webkit.mjs
+      - name: Exercise exact production hostname startup and failed asset retry
+        run: node tests/browser-production-origin.mjs
