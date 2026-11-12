@@ -15,6 +15,8 @@ assert.match(html,/id="boot-message"/, 'startup must be visible without JavaScri
 assert.match(html,/app\.js\?v=boot12/, 'app should use an explicit cache-busting version');
 assert.match(html,/script\.onload=ready/, 'startup should wait for script execution');
 assert.ok(html.indexOf('ready(){')<html.indexOf("style.href='/styles.css"), 'CSS must load after UI is rendered');
+assert.match(html,/window\\.location\\.hostname==='vputipoputka\\.ru'/, 'production boot must not depend on config.js');
+assert.match(html,/window\\.PO_PUTI_BACKEND=true/, 'production uses common API');
 assert.doesNotMatch(app,/window\.addEventListener\('load',\(\)=>navigator\.serviceWorker\.register/, 'no duplicate worker registration');
 new vm.Script(app,{filename:'www/app.js'});
 const inline=[...html.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/g)];
