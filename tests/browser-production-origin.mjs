@@ -20,7 +20,7 @@ try{
  const requests=[];
  let failAppOnce=false;
  await context.route(origin+'/**',async route=>{
-   const url=new URL(route.request().url);
+   const url=new URL(route.request().url());
    const pathname=url.pathname==='/'?'/index.html':url.pathname;
    requests.push(pathname);
    if(pathname==='/config.js'){
