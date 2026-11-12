@@ -49,6 +49,11 @@ try{
  assert(!pState.users.some(u=>u.id===outsider.user.id),'unrelated user leaked to passenger');
  const travelDate=new Date(Date.now()+3*86400000).toISOString().slice(0,10);
  const rideBody={from:'Казань',to:'Самара',date:travelDate,time:'15:30',seats:2,price:900,car:'Toyota',clientKey:'ride_'+suffix};
+ // API must not accept impossible dates or times even if Android/UI validation is bypassed.
+ const impossibleDate=await request('/rides','POST',{...rideBody,date:'2099-02-30'},driver.token);
+ assert.equal(impossibleDate.status,400,'invalid calendar date was accepted');
+ const impossibleTime=await request('/rides','POST',{...rideBody,time:'29:77'},driver.token);
+ assert.equal(impossibleTime.status,400,'invalid departure time was accepted');
  const ride=await ok('/rides','POST',rideBody,driver.token);
  const duplicate=await ok('/rides','POST',rideBody,driver.token);
  assert.equal(ride.id,duplicate.id,'ride idempotency failed');
