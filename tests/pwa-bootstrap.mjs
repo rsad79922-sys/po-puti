@@ -12,7 +12,7 @@ assert.match(sw,/caches\.delete/, 'old poisoned PWA caches must be cleared');
 assert.match(sw,/skipWaiting/);
 assert.match(sw,/clients\.claim/);
 assert.match(html,/id="boot-message"/, 'startup must be visible without JavaScript');
-assert.match(html,/app\.js\?v=boot11/, 'app should use an explicit cache-busting version');
+assert.match(html,/app\.js\?v=boot12/, 'app should use an explicit cache-busting version');
 assert.match(html,/script\.onload=ready/, 'startup should wait for script execution');
 assert.ok(html.indexOf('ready(){')<html.indexOf("style.href='/styles.css"), 'CSS must load after UI is rendered');
 assert.doesNotMatch(app,/window\.addEventListener\('load',\(\)=>navigator\.serviceWorker\.register/, 'no duplicate worker registration');
