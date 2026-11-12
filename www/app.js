@@ -2,7 +2,7 @@
 /* ПО ПУТИ v0.2 — локальная демоверсия и клиент единого API для Android + PWA. */
 const STORE = 'po-puti-prototype-v2';
 const TOKEN_STORE = 'po-puti-access-v2';
-const safeStorage = {getItem(key){try{return localStorage.getItem(key)}catch{return null}},setItem(key,value){try{localStorage.setItem(key,value)}catch{}}};
+const safeStorage = {getItem(key){try{return localStorage.getItem(key)}catch{return null}},setItem(key,value){try{localStorage.setItem(key,value)}catch{}},removeItem(key){try{localStorage.removeItem(key)}catch{}}};
 const DEMO_HASH_SALT = 'po-puti-demo-v2:';
 const SERVER_BASE = (window.PO_PUTI_API_BASE || '').replace(/\/$/, '');
 let remoteMode = window.PO_PUTI_BACKEND === true || !!window.PO_PUTI_API_BASE;
@@ -54,38 +54,57 @@ const api = async (path, method='GET', payload) => {
  finally{if(timeout)clearTimeout(timeout)}
 };
 let stateRefreshInFlight=null;
+let stateRefreshToken='';
 let lastStateSuccessAt=0;
-// Safari can fire focus while the foreground timer and a mutation refresh are
-// already downloading /state. Share the same request instead of racing updates.
-function refreshRemote(){
- if(!remoteMode)return Promise.resolve();
- if(stateRefreshInFlight)return stateRefreshInFlight;
+// Only one full /state request may be in flight. A successful POST must always
+// receive a *new* snapshot, even when a background refresh started before it.
+async function refreshRemote({fresh=false}={}){
+ if(!remoteMode)return true;
+ if(stateRefreshInFlight){
+   if(fresh||stateRefreshToken!==accessToken){
+     await stateRefreshInFlight;
+     return refreshRemote();
+   }
+   return stateRefreshInFlight;
+ }
  const sessionToken=accessToken;
+ stateRefreshToken=sessionToken;
  stateRefreshInFlight=(async()=>{
   try{
    const data=await api('/state');
-   // Ignore a response that belongs to a session which was signed out.
-   if(sessionToken!==accessToken)return;
+   if(sessionToken!==accessToken)return false;
    db={...data,search:db.search||{from:'',to:'',date:''},searchSubmitted:db.searchSubmitted||false,draft:db.draft||null};
    serverError='';
    lastStateSuccessAt=Date.now();
    if(me()?.role==='admin')adminData=await api('/admin/overview').catch(()=>null);
-   render();
+   // A polling response must not erase form fields while the person is typing.
+   const active=document.activeElement;
+   const editing=['INPUT','TEXTAREA','SELECT'].includes(active?.tagName)&&active?.closest?.('form');
+   if(!editing)render();
+   return true;
   }catch(err){
-   if(sessionToken!==accessToken)return;
+   if(sessionToken!==accessToken)return false;
    if(err.status===401){
-    accessToken='';
-    localStorage.removeItem(TOKEN_STORE);
-    db.currentUserId=null;
-    navigate('/login');
+     accessToken='';
+     safeStorage.removeItem(TOKEN_STORE);
+     db.currentUserId=null;
+     navigate('/login');
    }
    serverError=err.message;
    render();
+   return false;
   }
- })().finally(()=>{stateRefreshInFlight=null});
+ })().finally(()=>{stateRefreshInFlight=null;stateRefreshToken=''});
  return stateRefreshInFlight;
 }
-async function mutateRemote(path,payload,success){try{await api(path,'POST',payload);await refreshRemote();if(success)toast(success);return true}catch(err){toast(err.message);return false}};
+async function mutateRemote(path,payload,success){
+ try{
+  await api(path,'POST',payload);
+  const fresh=await refreshRemote({fresh:true});
+  if(success)toast(fresh?success:success+' (обновление данных временно недоступно)');
+  return true;
+ }catch(err){toast(err.message);return false}
+};
 async function demoHash(pwd){const value=DEMO_HASH_SALT+pwd;const buf=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(value));return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('')};
 const me = () => db.users.find(u=>u.id === db.currentUserId);
 const user = id => db.users.find(u=>u.id===id) || {name:'Участник',car:'Автомобиль не указан',phone:''};
@@ -216,7 +235,7 @@ function handleAction(target){const action=target.dataset.action,id=target.datas
  case 'modal-close':hideModal();break;
  case 'switch-demo':{const u=db.users.find(x=>x.id===target.dataset.user);if(!u)break;db.currentUserId=u.id;save();hideModal();tripsTab='future';toast('Вы вошли как '+u.name);navigate('/search');break;}
  case 'logout':{showModal('Выйти из аккаунта?','Вы сможете войти снова по логину и паролю.',btn('Остаться','modal-close','ghost')+btn('Выйти','logout-confirm','danger'));break;}
- case 'logout-confirm':{if(remoteMode&&accessToken){api('/logout','POST',{}).catch(()=>{});accessToken='';localStorage.removeItem(TOKEN_STORE);}db.currentUserId=null;save();hideModal();navigate('/login');break;}
+ case 'logout-confirm':{if(remoteMode&&accessToken){api('/logout','POST',{}).catch(()=>{});accessToken='';safeStorage.removeItem(TOKEN_STORE);}db.currentUserId=null;save();hideModal();navigate('/login');break;}
  case 'login-modal':navigate('/login');break;
  case 'reset-demo':showModal('Сбросить демонстрацию?','Все добавленные поездки, заявки и настройки в этом браузере будут удалены.',btn('Отмена','modal-close','ghost')+btn('Сбросить','reset-confirm','danger'));break;
  case 'reset-confirm':db=seed();save();hideModal();navigate('/search');toast('Демонстрационные данные сброшены');break;
@@ -229,7 +248,7 @@ document.addEventListener('submit',ev=>{const form=ev.target;if(!['search-form',
  if(form.id==='search-form'){const data=new FormData(form);const from=String(data.get('from')||'').trim(),to=String(data.get('to')||'').trim();if(!from||!to){toast('Укажите оба города');return;}db.search={from,to,date:String(data.get('date')||'')};db.searchSubmitted=true;save();render();toast('Поиск выполнен');return;}
  if(form.id==='publish-form'){if(imageProcessing){toast('Подождите, пока фотография обработается');return;}setDraftFromForm();const error=validateDraft(db.draft);if(error){toast(error);return;}pubStep=2;render();scrollTo(0,0);return;}
  if(form.id==='profile-form'){const fd=new FormData(form),name=String(fd.get('name')||'').trim(),car=String(fd.get('car')||'').trim(),phone=String(fd.get('phone')||'').trim();if(!name){toast('Укажите имя');return;}if(remoteMode){mutateRemote('/profile',{name,car,phone},'Профиль сохранён');return;}me().name=name;me().car=car;me().phone=phone;save();toast('Профиль сохранён');render();return;}
- if(form.id==='login-form'){const fd=new FormData(form),username=String(fd.get('username')||'').trim().toLowerCase(),password=String(fd.get('password')||'');if(!/^[a-z0-9_-]{3,32}$/.test(username)){toast('Логин: 3–32 латинские буквы, цифры, _ или -');return;}if(password.length<8){toast('Пароль должен быть не короче 8 символов');return;}if(remoteMode){api(accountTab==='register'?'/register':'/login','POST',{username,password}).then(data=>{accessToken=data.token;localStorage.setItem(TOKEN_STORE,accessToken);db.currentUserId=data.user.id;serverError='';refreshRemote().then(()=>navigate('/search'))}).catch(e=>toast(e.message));return;}demoHash(password).then(hash=>{let u=db.users.find(u=>u.username===username);if(accountTab==='register'){if(!fd.get('terms')){toast('Подтвердите согласие');return;}if(u){toast('Такой логин уже занят');return;}u={id:ids(),username,passwordHash:hash,name:username,car:'',phone:'',photo:'',role:'user'};db.users.push(u)}else if(!u||u.passwordHash!==hash){toast('Неверный логин или пароль');return;}db.currentUserId=u.id;save();toast('Вход выполнен в демоверсии');navigate('/search')}).catch(()=>toast('Для проверки входа откройте демоверсию по HTTPS или localhost'));return;}
+ if(form.id==='login-form'){const fd=new FormData(form),username=String(fd.get('username')||'').trim().toLowerCase(),password=String(fd.get('password')||'');if(!/^[a-z0-9_-]{3,32}$/.test(username)){toast('Логин: 3–32 латинские буквы, цифры, _ или -');return;}if(password.length<8){toast('Пароль должен быть не короче 8 символов');return;}if(remoteMode){api(accountTab==='register'?'/register':'/login','POST',{username,password}).then(data=>{accessToken=data.token;localStorage.setItem(TOKEN_STORE,accessToken);db.currentUserId=data.user.id;serverError='';refreshRemote({fresh:true}).then(()=>navigate('/search'))}).catch(e=>toast(e.message));return;}demoHash(password).then(hash=>{let u=db.users.find(u=>u.username===username);if(accountTab==='register'){if(!fd.get('terms')){toast('Подтвердите согласие');return;}if(u){toast('Такой логин уже занят');return;}u={id:ids(),username,passwordHash:hash,name:username,car:'',phone:'',photo:'',role:'user'};db.users.push(u)}else if(!u||u.passwordHash!==hash){toast('Неверный логин или пароль');return;}db.currentUserId=u.id;save();toast('Вход выполнен в демоверсии');navigate('/search')}).catch(()=>toast('Для проверки входа откройте демоверсию по HTTPS или localhost'));return;}
  if(form.id==='message-form'){const fd=new FormData(form),rideId=String(fd.get('rideId')),toId=String(fd.get('toId')),message=String(fd.get('text')||'').trim();if(!message||!hasConfirmedContact(rideId,toId))return;if(remoteMode){mutateRemote('/messages',{rideId,toId,text:message},'Сообщение отправлено');return;}db.messages.push({id:ids(),rideId,fromId:db.currentUserId,toId,text:message,created:Date.now()});notify(toId,'Новое сообщение',message.slice(0,120),rideId);save();render();return;}
  if(form.id==='review-form'){const fd=new FormData(form),rideId=String(fd.get('rideId')),score=Number(fd.get('score')),text=String(fd.get('text')||'').trim();if(!text)return;if(remoteMode){mutateRemote('/reviews',{rideId,score,text},'Отзыв опубликован');return;}const trip=db.rides.find(r=>r.id===rideId);if(!trip||!myRequest(rideId)||myRequest(rideId).status!=='accepted'){toast('Нельзя оставить отзыв');return;}if((db.reviews||[]).some(r=>r.rideId===rideId&&r.authorId===db.currentUserId)){toast('Вы уже оставили отзыв');return;}db.reviews.push({id:ids(),rideId,driverId:trip.driverId,authorId:db.currentUserId,author:me().name,score,text,date:today()});save();toast('Отзыв опубликован');render();return;}
  if(form.id==='report-form'){const fd=new FormData(form),rideId=String(fd.get('rideId')),reason=String(fd.get('reason')),details=String(fd.get('details')||'').trim();if(remoteMode){mutateRemote('/reports',{rideId,reason,details},'Жалоба отправлена');hideModal();return;}db.reports.push({id:ids(),rideId,userId:db.currentUserId,reason,details,created:Date.now()});save();hideModal();toast('Жалоба отправлена администратору');render();return;}
