@@ -44,6 +44,8 @@ jobs:
         run: node tests/public-connectivity.mjs
       - name: Test isolated multi-user booking and security
         run: node tests/server-full-flow.mjs
+      - name: Check Safari refresh request deduplication
+        run: node tests/refresh-singleflight.mjs
       - name: Check anonymous and returning-session startup
         run: node tests/mobile-startup.mjs
       - name: Run real WebKit iPhone-sized browser smoke
