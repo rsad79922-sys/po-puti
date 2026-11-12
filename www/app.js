@@ -244,4 +244,4 @@ setInterval(()=>{if(remoteMode&&accessToken&&navigator.onLine&&document.visibili
 window.addEventListener('focus',()=>{if(remoteMode&&accessToken&&navigator.onLine)refreshRemote()});
 window.addEventListener('storage',event=>{if(event.key===STORE){try{db=JSON.parse(event.newValue)||seed();render()}catch{}}});
 if(!location.hash)location.hash='/search';if(remoteMode){let localUI={};try{localUI=JSON.parse(safeStorage.getItem('po-puti-ui-v2')||'{}')}catch{localUI={}};db={currentUserId:null,users:[],rides:[],requests:[],notifications:[],reviews:[],messages:[],reports:[],search:localUI.search||{from:'Москва',to:'Санкт-Петербург',date:today(1)},searchSubmitted:true,draft:localUI.draft||null};if(accessToken){render();refreshRemote()}else{navigate('/login');render()}}else{save();render()};
-if('serviceWorker' in navigator && location.protocol!=='file:' && !window.Capacitor){window.addEventListener('load',()=>navigator.serviceWorker.register('./sw.js').catch(()=>{}))}
+// Service Worker update is managed by index.html only; never delay app rendering.
