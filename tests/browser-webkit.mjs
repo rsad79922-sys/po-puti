@@ -49,11 +49,24 @@ try{
  await page.reload({waitUntil:'domcontentloaded',timeout:20000});
  await expectLogin('reload');
  console.log('WebKit iPhone reload OK');
+ // Exercise the previously failing Service Worker scenario. Local HTTP loopback is
+ // considered a secure origin in WebKit; the production bootstrap only registers on HTTPS.
+ await page.evaluate(async()=>{if('serviceWorker' in navigator){await navigator.serviceWorker.register('/sw.js');await navigator.serviceWorker.ready}});
+ await page.reload({waitUntil:'domcontentloaded',timeout:20000});
+ await expectLogin('reload with installed Service Worker');
+ console.log('WebKit iPhone reload with service worker OK');
  await page.goto(origin+'/mobile-check.html',{waitUntil:'domcontentloaded',timeout:20000});
  assert.match(await page.locator('body').innerText(),/проверка загрузки/i);
  await page.goto(origin+'/',{waitUntil:'domcontentloaded',timeout:20000});
  await expectLogin('after diagnostic navigation');
  console.log('WebKit iPhone navigation after diagnostic OK');
+ // Simulate a fresh Safari tab after the first one has been used.
+ const secondTab=await context.newPage();
+ await secondTab.goto(origin+'/',{waitUntil:'domcontentloaded',timeout:20000});
+ await secondTab.waitForSelector('#login-form');
+ assert.equal(await secondTab.locator('#boot').count(),0,'new tab should not show boot overlay');
+ console.log('WebKit iPhone second-tab navigation OK');
+ await secondTab.close();
  await context.close();
 }finally{
  if(browser)await browser.close();
