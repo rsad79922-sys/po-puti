@@ -89,7 +89,7 @@
     /* Do not block navigation on CSS, manifest or a service worker. */
     setTimeout(start,60);
     setTimeout(function(){if(!done)fail('Загрузка длится слишком долго. Нажмите «Повторить загрузку».');},10000);
-    if('serviceWorker' in navigator){
+    if('serviceWorker' in navigator && !window.Capacitor && location.protocol==='https:'){
       navigator.serviceWorker.register('/sw.js',{updateViaCache:'none'})
         .then(function(reg){return reg.update()}).catch(function(){});
     }
