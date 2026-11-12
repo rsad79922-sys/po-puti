@@ -1,54 +1,54 @@
 #!/usr/bin/env bash
-# Time-limited, reversible HTTPS TCP MSS experiment. NOT an automatic deploy fix.
-# This affects only new TCP:443 handshakes, not SSH, the database or application code.
-# Execute as root on the VPS, from a persistent terminal; Ctrl-C also rolls back.
+# Controlled two-way IPv4 MSS diagnostic. NEVER runs automatically.
+# A systemd transient timer is REQUIRED so VNC disconnection or SIGKILL cannot
+# leave test rules installed indefinitely. Reboot naturally flushes rules.
 set -Eeuo pipefail
-
-if [[ "${EUID}" -ne 0 ]]; then
-  echo 'Run as root (sudo). No rules changed.' >&2
-  exit 1
+if [[ "$EUID" -ne 0 ]]; then
+ echo 'Root privileges required. No rules were changed.' >&2
+ exit 1
 fi
-if ! command -v iptables >/dev/null 2>&1; then
-  echo 'iptables is unavailable. No rules changed.' >&2
-  exit 1
+for cmd in iptables systemd-run; do
+ if ! command -v "$cmd" >/dev/null 2>&1; then
+   echo "$cmd missing. No rules were changed." >&2
+   exit 1
+ fi
+done
+MODE="${1:-start}"
+TAG="${2:-}"
+if [[ "$MODE" == rollback ]]; then
+ if [[ ! "$TAG" =~ ^poputi-mss-[0-9]+-[0-9]+$ ]]; then
+   echo "Invalid rollback tag" >&2
+   exit 2
+ fi
+else
+ if [[ "$MODE" != start ]]; then echo "Usage: bash $0 [start]" >&2; exit 2; fi
+ TAG="poputi-mss-$(date +%s)-$$"
 fi
-
-# Incoming SYN advertises what the client can receive (server -> client).
-# Outgoing SYN-ACK advertises what the server can receive (client -> server).
-# Both directions must be clamped when investigating an incomplete ClientHello.
-incoming=(-p tcp --dport 443 --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1200)
-outgoing=(-p tcp --sport 443 --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1200)
-added_in=0
-added_out=0
-cleanup(){
-  trap - EXIT INT TERM
-  if [[ "$added_out" -eq 1 ]]; then
-    iptables -t mangle -D OUTPUT "${outgoing[@]}" || echo 'WARNING: OUTPUT rollback failed!' >&2
-  fi
-  if [[ "$added_in" -eq 1 ]]; then
-    iptables -t mangle -D PREROUTING "${incoming[@]}" || echo 'WARNING: PREROUTING rollback failed!' >&2
-  fi
-  echo 'Experiment ended. Newly inserted TCPMSS rules removed.'
+# Peer advertises the largest TCP payload it accepts in SYN or SYN-ACK.
+# Incoming SYN -> server-to-client packets; outgoing SYN-ACK -> client-to-server.
+incoming=(-p tcp --dport 443 --tcp-flags SYN,RST SYN -m comment --comment "$TAG" -j TCPMSS --set-mss 1200)
+outgoing=(-p tcp --sport 443 --tcp-flags SYN,RST SYN -m comment --comment "$TAG" -j TCPMSS --set-mss 1200)
+rollback(){
+ iptables -t mangle -D OUTPUT "${outgoing[@]}" >/dev/null 2>&1 || true
+ iptables -t mangle -D PREROUTING "${incoming[@]}" >/dev/null 2>&1 || true
 }
-trap cleanup EXIT
+if [[ "$MODE" == rollback ]]; then
+ rollback
+ echo "Auto-rollback completed for $TAG"
+ exit 0
+fi
+SELF="$(readlink -f "$0")"
+UNIT="poputi-mss-rollback-$(date +%s)-$$"
+# Schedule a separate automatic rollback BEFORE changing any firewall rule.
+# A failed timer setup blocks the experiment (important for a remote VNC session).
+systemd-run --quiet --collect --unit="$UNIT" --on-active=150s /bin/bash "$SELF" rollback "$TAG"
+trap rollback EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
-
-echo 'Starting a 120-second test; rules will be deleted when this script exits.'
-echo 'Connections already established will retain their previous MSS.'
-if ! iptables -t mangle -C PREROUTING "${incoming[@]}" >/dev/null 2>&1; then
-  iptables -t mangle -I PREROUTING 1 "${incoming[@]}"
-  added_in=1
-else
-  echo 'Matching PREROUTING rule already exists; this script will not remove it.'
-fi
-if ! iptables -t mangle -C OUTPUT "${outgoing[@]}" >/dev/null 2>&1; then
-  iptables -t mangle -I OUTPUT 1 "${outgoing[@]}"
-  added_out=1
-else
-  echo 'Matching OUTPUT rule already exists; this script will not remove it.'
-fi
-
-echo 'ACTIVE: retry a fresh Safari tab on both Wi-Fi and LTE. Do not reuse an old TCP connection.'
-echo 'Always compare against the same site without the rule afterward.'
+iptables -t mangle -I PREROUTING 1 "${incoming[@]}"
+iptables -t mangle -I OUTPUT 1 "${outgoing[@]}"
+echo "ACTIVE: Temporary 120-second MSS=1200 diagnostic for TCP:443; fresh connections only."
+echo "Independent systemd rollback scheduled after 150 seconds, even if VNC disconnects."
+echo "New connections in Safari only; do not reboot or make other server changes during test."
 sleep 120
+echo 'Experiment finished; removing both rules.'
