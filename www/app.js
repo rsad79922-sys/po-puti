@@ -42,7 +42,17 @@ let db;
 try {db = JSON.parse(localStorage.getItem(STORE)) || seed();} catch {db = seed();}
 if (!db || !Array.isArray(db.users) || !Array.isArray(db.rides)) db = seed();
 const save = () => {try {if (remoteMode) {localStorage.setItem('po-puti-ui-v2',JSON.stringify({search:db.search,searchSubmitted:db.searchSubmitted,draft:db.draft}));} else localStorage.setItem(STORE,JSON.stringify(db));}catch {toast('Не удалось сохранить локальные настройки.');}};
-const api = async (path, method='GET', payload) => {const res=await fetch(SERVER_BASE+'/api'+path,{method,headers:{'Content-Type':'application/json',...(accessToken?{'Authorization':'Bearer '+accessToken}:{})},body:payload===undefined?undefined:JSON.stringify(payload),cache:'no-store'});const data=await res.json().catch(()=>({}));if(!res.ok){const err=new Error(data.error||'Ошибка сервера ('+res.status+')');err.status=res.status;throw err}return data};
+const api = async (path, method='GET', payload) => {
+ const controller=typeof AbortController!=='undefined'?new AbortController():null;
+ const timeout=controller?setTimeout(()=>controller.abort(),12000):null;
+ try {
+  const res=await fetch(SERVER_BASE+'/api'+path,{method,headers:{'Content-Type':'application/json',...(accessToken?{'Authorization':'Bearer '+accessToken}:{})},body:payload===undefined?undefined:JSON.stringify(payload),cache:'no-store',...(controller?{signal:controller.signal}:{})});
+  const data=await res.json().catch(()=>({}));
+  if(!res.ok){const err=new Error(data.error||'Ошибка сервера ('+res.status+')');err.status=res.status;throw err}
+  return data;
+ }catch(error){if(error.name==='AbortError')throw new Error('Сервер долго не отвечает. Повторите запрос.');throw error}
+ finally{if(timeout)clearTimeout(timeout)}
+};
 async function refreshRemote(){if(!remoteMode)return;try{const data=await api('/state');db={...data,search:db.search||{from:'',to:'',date:''},searchSubmitted:db.searchSubmitted||false,draft:db.draft||null};serverError='';if(me()?.role==='admin'){adminData=await api('/admin/overview').catch(()=>null)}render()}catch(err){if(err.status===401){accessToken='';localStorage.removeItem(TOKEN_STORE);db.currentUserId=null;navigate('/login')}serverError=err.message;render()}};
 async function mutateRemote(path,payload,success){try{await api(path,'POST',payload);await refreshRemote();if(success)toast(success);return true}catch(err){toast(err.message);return false}};
 async function demoHash(pwd){const value=DEMO_HASH_SALT+pwd;const buf=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(value));return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('')};
@@ -233,5 +243,5 @@ window.addEventListener('offline',()=>render());
 setInterval(()=>{if(remoteMode&&accessToken&&navigator.onLine&&document.visibilityState==='visible'&&!document.querySelector('.overlay')&&!['INPUT','TEXTAREA','SELECT'].includes(document.activeElement?.tagName))refreshRemote()},15000);
 window.addEventListener('focus',()=>{if(remoteMode&&accessToken&&navigator.onLine)refreshRemote()});
 window.addEventListener('storage',event=>{if(event.key===STORE){try{db=JSON.parse(event.newValue)||seed();render()}catch{}}});
-if(!location.hash)location.hash='/search';if(remoteMode){let localUI={};try{localUI=JSON.parse(safeStorage.getItem('po-puti-ui-v2')||'{}')}catch{localUI={}};db={currentUserId:null,users:[],rides:[],requests:[],notifications:[],reviews:[],messages:[],reports:[],search:localUI.search||{from:'Москва',to:'Санкт-Петербург',date:today(1)},searchSubmitted:true,draft:localUI.draft||null};if(accessToken)refreshRemote();else{navigate('/login');render()}}else{save();render()};
+if(!location.hash)location.hash='/search';if(remoteMode){let localUI={};try{localUI=JSON.parse(safeStorage.getItem('po-puti-ui-v2')||'{}')}catch{localUI={}};db={currentUserId:null,users:[],rides:[],requests:[],notifications:[],reviews:[],messages:[],reports:[],search:localUI.search||{from:'Москва',to:'Санкт-Петербург',date:today(1)},searchSubmitted:true,draft:localUI.draft||null};if(accessToken){render();refreshRemote()}else{navigate('/login');render()}}else{save();render()};
 if('serviceWorker' in navigator && location.protocol!=='file:' && !window.Capacitor){window.addEventListener('load',()=>navigator.serviceWorker.register('./sw.js').catch(()=>{}))}
