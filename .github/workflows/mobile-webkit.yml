@@ -9,6 +9,13 @@ on:
       - 'deploy/**'
       - 'tests/**'
       - '.github/workflows/mobile-webkit.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'www/**'
+      - 'server/**'
+      - 'tests/**'
+      - '.github/workflows/mobile-webkit.yml'
   workflow_dispatch:
 
 permissions:
@@ -42,7 +49,11 @@ jobs:
         run: node tests/server-routing.mjs
       - name: Test isolated multi-user booking and security
         run: node tests/server-full-flow.mjs
+      - name: Test profile and car photos in isolated SQLite
+        run: node tests/photo-upload.mjs
       - name: Check anonymous and returning-session startup
         run: node tests/mobile-startup.mjs
       - name: Run real WebKit iPhone-sized browser smoke
         run: node tests/browser-webkit.mjs
+      - name: Test iPhone Safari photo selection and upload
+        run: node tests/browser-photo-upload.mjs
