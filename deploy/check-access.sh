@@ -36,7 +36,14 @@ echo
 echo "--- Nginx local HTTPS with correct hostname / certificate ---"
 curl --noproxy '*' --resolve "$DOMAIN:443:127.0.0.1" --connect-timeout 5 --max-time 12 -sS -I "https://$DOMAIN/" || true
 echo
-echo "--- Recent nginx error logs (may contain client IPs; redact before sharing) ---"
+echo "--- Recent real nginx error log (may contain client IPs; redact before sharing) ---"
+if [ -r /var/log/nginx/error.log ]; then
+  tail -n 25 /var/log/nginx/error.log
+else
+  echo "Nginx error.log is not readable or does not exist."
+fi
+echo
+echo "--- Nginx service journal (start/restart events, NOT HTTP errors) ---"
 journalctl -u nginx --no-pager -n 10 2>/dev/null || true
 echo
 echo "=== END OF DIAGNOSIS ==="
