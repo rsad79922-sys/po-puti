@@ -50,6 +50,17 @@ try {
  assert.equal(head.status,200);
  assert.equal(await head.text(),'');
  assert.equal(head.headers.get('content-type'),'text/html; charset=utf-8');
+ // Android Capacitor 7 uses https://localhost as its WebView origin.
+ const preflight=await fetch(base+'/api/state',{method:'OPTIONS',headers:{
+  Origin:'https://localhost',
+  'Access-Control-Request-Method':'GET',
+  'Access-Control-Request-Headers':'Authorization'
+ }});
+ assert.equal(preflight.status,204,'Android preflight rejected');
+ assert.equal(preflight.headers.get('access-control-allow-origin'),'https://localhost','Android origin not allowed');
+ assert.match(preflight.headers.get('access-control-allow-headers')||'',/Authorization/i,'Android bearer token preflight blocked');
+ const untrusted=await fetch(base+'/api/state',{method:'OPTIONS',headers:{Origin:'https://untrusted.example'}});
+ assert.equal(untrusted.status,403,'untrusted origins must remain blocked');
  const config=await check('/config.js','*/*');
  assert.equal(config.status,200);
  assert.match(await config.text(),/PO_PUTI_BACKEND\s*=\s*true/);
