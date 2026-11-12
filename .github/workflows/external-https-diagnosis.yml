@@ -1,0 +1,18 @@
+name: Public HTTPS reachability diagnosis
+on:
+  push:
+    branches: [diagnostics/https-intermittent-20261112]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Probe domain and raw IP from external network
+        run: node tests/network-health-20261112.mjs
