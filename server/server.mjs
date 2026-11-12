@@ -76,23 +76,56 @@ function checkedPhoto(value, maxBytes){
  return value;
 }
 function isoDay(){return new Date().toISOString().slice(0,10)}
-function parseBody(req){return new Promise((resolve,reject)=>{let size=0,parts=[];req.on('data',c=>{size+=c.length;if(size>1_100_000){reject(jsonError('Слишком большой запрос',413));req.destroy();return;}parts.push(c)});req.on('end',()=>{try{resolve(JSON.parse(Buffer.concat(parts).toString('utf8')||'{}'))}catch{reject(jsonError('Некорректные данные'))}});req.on('error',reject)});}
+function parseBody(req){
+ return new Promise((resolve,reject)=>{
+  let size=0,parts=[],oversized=false;
+  req.on('data',chunk=>{
+   if(oversized)return;
+   size+=chunk.length;
+   if(size>1_100_000){
+    oversized=true;parts=[];reject(jsonError('Слишком большой запрос',413));
+    return; // Do not destroy the socket before the 413 response is sent.
+   }
+   parts.push(chunk);
+  });
+  req.on('end',()=>{
+   if(oversized)return;
+   try{
+    const parsed=JSON.parse(Buffer.concat(parts).toString('utf8')||'{}');
+    if(!parsed||typeof parsed!=='object'||Array.isArray(parsed))throw Error('Invalid JSON payload');
+    resolve(parsed);
+   }catch{reject(jsonError('Некорректные данные'))}
+  });
+  req.on('error',reject);
+  req.on('aborted',()=>reject(jsonError('Клиент прервал запрос',400)));
+ });
+}
 function send(res,data,status=200){res.writeHead(status,{'content-type':'application/json; charset=utf-8','cache-control':'no-store'});res.end(JSON.stringify(data))}
-function state(actor){const reqs=rows('SELECT * FROM requests WHERE user_id=? OR ride_id IN (SELECT id FROM rides WHERE driver_id=?) ORDER BY created DESC',actor.id,actor.id);
+function state(actor){
+ // One JOIN instead of an extra blocking SQLite lookup per accepted request.
+ const reqs=rows('SELECT req.*, rides.driver_id FROM requests req JOIN rides ON rides.id=req.ride_id WHERE req.user_id=? OR rides.driver_id=? ORDER BY req.created DESC',actor.id,actor.id);
  const rides=rows('SELECT * FROM rides ORDER BY date,time').map(publicRide);
  const visibleIds=new Set([actor.id,...rides.map(r=>r.driverId)]);
  const peers=new Set([actor.id]);
  for(const r of reqs){
-   visibleIds.add(r.user_id); // A driver must see people who requested their rides.
-   if(r.status==='accepted'){
-     const ride=q('SELECT driver_id FROM rides WHERE id=?',r.ride_id);
-     if(ride){visibleIds.add(ride.driver_id);peers.add(ride.driver_id);peers.add(r.user_id)}
-   }
+  visibleIds.add(r.user_id);
+  if(r.status==='accepted'){
+   visibleIds.add(r.driver_id);
+   peers.add(r.driver_id);
+   peers.add(r.user_id);
+  }
  }
- // Do not disclose every registered account to unrelated passengers.
- const users=rows('SELECT id,username,name,phone,car,photo,role FROM users')
-   .filter(u=>visibleIds.has(u.id))
-   .map(u=>({...u,phone:peers.has(u.id)?u.phone:''}));
+ // SQL must filter visible accounts BEFORE reading potentially large avatar BLOBs.
+ // Keep chunks below SQLite bind parameter limits without changing the API shape.
+ const visible=[...visibleIds];
+ const users=[];
+ for(let i=0;i<visible.length;i+=400){
+  const batch=visible.slice(i,i+400);
+  const placeholders=batch.map(()=>'?').join(',');
+  for(const u of rows('SELECT id,username,name,phone,car,photo,role FROM users WHERE id IN ('+placeholders+')',...batch)){
+   users.push({...u,phone:peers.has(u.id)?u.phone:''});
+  }
+ }
  const notifications=rows('SELECT * FROM notifications WHERE recipient_id=? ORDER BY created DESC LIMIT 300',actor.id).map(n=>({id:n.id,to:n.recipient_id,title:n.title,message:n.message,rideId:n.ride_id,read:!!n.read,created:n.created}));
  const reviews=rows('SELECT r.*,u.name author FROM reviews r JOIN users u ON u.id=r.author_id ORDER BY r.created DESC').map(r=>({id:r.id,rideId:r.ride_id,driverId:r.driver_id,authorId:r.author_id,author:r.author,score:r.score,text:r.text,date:new Date(r.created).toISOString().slice(0,10)}));
  const messages=rows('SELECT * FROM messages WHERE from_id=? OR to_id=? ORDER BY created DESC LIMIT 1000',actor.id,actor.id).map(m=>({id:m.id,rideId:m.ride_id,fromId:m.from_id,toId:m.to_id,text:m.text,created:m.created}));
@@ -126,7 +159,9 @@ function handleApi(req,path,data){const method=req.method;
  if(path==='/api/rides'&&method==='POST'){
    const from=clean(data.from,100),to=clean(data.to,100),date=clean(data.date,10),time=clean(data.time,5),car=clean(data.car,90);
    const seats=Number(data.seats),price=data.negotiable?null:Number(data.price);
-   if(!from||!to||from.toLowerCase()===to.toLowerCase()||!/^\d{4}-\d{2}-\d{2}$/.test(date)||!/^\d{2}:\d{2}$/.test(time)||date<isoDay()||!Number.isInteger(seats)||seats<1||seats>7||(!data.negotiable&&(!Number.isInteger(price)||price<0||price>100000))||!car)throw jsonError('Проверьте маршрут, дату, места, стоимость и автомобиль');
+    const validDate=/^\d{4}-\d{2}-\d{2}$/.test(date)&&!Number.isNaN(Date.parse(date+'T00:00:00Z'))&&new Date(date+'T00:00:00Z').toISOString().slice(0,10)===date;
+    const validTime=/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(time);
+   if(!from||!to||from.toLowerCase()===to.toLowerCase()||!validDate||!validTime||date<isoDay()||!Number.isInteger(seats)||seats<1||seats>7||(!data.negotiable&&(!Number.isInteger(price)||price<0||price>100000))||!car)throw jsonError('Проверьте маршрут, дату, места, стоимость и автомобиль');
    const key=clean(data.clientKey,80);if(key&&!/^[a-zA-Z0-9_-]{10,80}$/.test(key))throw jsonError('Неверный идентификатор операции');
    return transaction(()=>{if(key){const prev=q('SELECT ride_id FROM ride_operations WHERE user_id=? AND client_key=?',actor.id,key);if(prev)return {id:prev.ride_id,repeated:true};}
    const id=uid();run('INSERT INTO rides VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',id,actor.id,from,to,date,time,seats,price,car,clean(data.pickup,150),clean(data.dropoff,150),clean(data.luggage,60),clean(data.comment,550),checkedPhoto(data.photo,120000),0,now());if(key)run('INSERT INTO ride_operations VALUES(?,?,?)',actor.id,key,id);return {id};});
@@ -183,7 +218,18 @@ async function serveStatic(req,res,pathname){
  res.end(req.method==='HEAD'?undefined:body);
 }
 const server=http.createServer(async(req,res)=>{
+ const startTime=Date.now();
  const reqUrl=new URL(req.url,'http://localhost');const origin=req.headers.origin;
+ // Log only slow/aborted API requests, never tokens, IPs, URLs with query or bodies.
+ if(reqUrl.pathname.startsWith('/api/')){
+  res.on('finish',()=>{
+   const ms=Date.now()-startTime;
+   if(ms>=2000||res.statusCode>=500)console.warn('[api-slow]',req.method,reqUrl.pathname,res.statusCode,ms+'ms');
+  });
+  res.on('close',()=>{
+   if(!res.writableFinished)console.warn('[api-aborted]',req.method,reqUrl.pathname,Date.now()-startTime+'ms');
+  });
+ }
  if(origin&&allowedOrigins.has(origin)){res.setHeader('access-control-allow-origin',origin);res.setHeader('vary','Origin');res.setHeader('access-control-allow-headers','Content-Type, Authorization');res.setHeader('access-control-allow-methods','GET, POST, OPTIONS')}
  res.setHeader('x-content-type-options','nosniff');res.setHeader('referrer-policy','strict-origin-when-cross-origin');
  try{
