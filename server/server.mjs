@@ -42,17 +42,34 @@ const now = () => Date.now();
 const clean = (value,max=120) => String(value||'').trim().slice(0,max);
 const usernameValid = v=>/^[a-z0-9_-]{3,32}$/.test(v);
 const passwordValid = v=>typeof v==='string' && v.length>=8 && v.length<=128;
-const saltHash = (password,salt) => crypto.scryptSync(password,salt,64,{N:32768,r:8,p:1,maxmem:64*1024*1024}).toString('hex');
+// Let the OpenSSL worker pool perform costly password derivation. Synchronous
+// scrypt in an HTTP callback blocks health checks and every other request.
+const saltHash = (password,salt) => new Promise((resolve,reject)=>{
+ crypto.scrypt(password,salt,64,{N:32768,r:8,p:1,maxmem:64*1024*1024},(err,key)=>{
+  if(err)reject(err);else resolve(key.toString('hex'));
+ });
+});
 const jsonError=(message,status=400)=>Object.assign(new Error(message),{status});
 const allowedOrigins = new Set((process.env.APP_ORIGINS||'https://localhost,capacitor://localhost,http://localhost:8080').split(',').map(v=>v.trim()).filter(Boolean));
 const limit = new Map();
+let lastRateSweep=0;
 function clientIp(req){
  const peer = req.socket.remoteAddress || '';
  const forwarded = String(req.headers['x-real-ip'] || '');
  const localProxy = ['127.0.0.1','::1','::ffff:127.0.0.1'].includes(peer);
  return localProxy && /^[0-9a-fA-F:.]{3,45}$/.test(forwarded) ? forwarded : peer;
 }
-function checkRate(ip){const t=Date.now(),r=limit.get(ip)||{start:t,count:0};if(t-r.start>15*60_000){r.start=t;r.count=0;}r.count++;limit.set(ip,r);if(r.count>55)throw jsonError('Слишком много попыток. Повторите позже.',429);}
+function checkRate(ip){
+ const t=Date.now();
+ if(t-lastRateSweep>15*60_000){
+  for(const [key,entry] of limit)if(t-entry.start>15*60_000)limit.delete(key);
+  lastRateSweep=t;
+ }
+ const r=limit.get(ip)||{start:t,count:0};
+ if(t-r.start>15*60_000){r.start=t;r.count=0;}
+ r.count++;limit.set(ip,r);
+ if(r.count>55)throw jsonError('Слишком много попыток. Повторите позже.',429);
+}
 function notify(recipient,title,message,rideId=''){run('INSERT INTO notifications VALUES(?,?,?,?,?,?,?)',uid(),recipient,title,message,rideId,0,now());}
 function transaction(fn){database.exec('BEGIN IMMEDIATE');try{const val=fn();database.exec('COMMIT');return val}catch(err){database.exec('ROLLBACK');throw err}}
 function getActor(req){const token=(req.headers.authorization||'').match(/^Bearer (\S+)$/)?.[1];if(!token)return null;return q('SELECT u.* FROM users u INNER JOIN sessions s ON s.user_id=u.id WHERE s.token_hash=? AND s.expires>?',sha(token),now())||null;}
@@ -104,7 +121,10 @@ function send(res,data,status=200){res.writeHead(status,{'content-type':'applica
 function state(actor){
  // One JOIN instead of an extra blocking SQLite lookup per accepted request.
  const reqs=rows('SELECT req.*, rides.driver_id FROM requests req JOIN rides ON rides.id=req.ride_id WHERE req.user_id=? OR rides.driver_id=? ORDER BY req.created DESC',actor.id,actor.id);
- const rides=rows('SELECT * FROM rides ORDER BY date,time').map(publicRide);
+ // Discovery only needs upcoming rides, while each participant keeps access
+ // to their own historical rides (driver or passenger). This bounds growth of
+ // unrelated historical car photos in each recurring /state response.
+ const rides=rows('SELECT * FROM rides WHERE date>=? OR driver_id=? OR id IN (SELECT ride_id FROM requests WHERE user_id=?) ORDER BY date,time',isoDay(),actor.id,actor.id).map(publicRide);
  const visibleIds=new Set([actor.id,...rides.map(r=>r.driverId)]);
  const peers=new Set([actor.id]);
  for(const r of reqs){
@@ -132,17 +152,17 @@ function state(actor){
  return {currentUserId:actor.id,users,rides,requests:reqs.map(r=>({id:r.id,rideId:r.ride_id,userId:r.user_id,status:r.status,created:r.created})),notifications,reviews,messages,reports:[]};
 }
 function cancelRide(ride,actor,asAdmin=false){if(ride.driver_id!==actor.id&&!asAdmin)throw jsonError('Недостаточно прав',403);if(ride.cancelled)throw jsonError('Поездка уже отменена',409);transaction(()=>{run('UPDATE rides SET cancelled=1 WHERE id=?',ride.id);for(const r of rows("SELECT * FROM requests WHERE ride_id=? AND status IN ('pending','accepted')",ride.id)){run("UPDATE requests SET status='cancelled' WHERE id=?",r.id);notify(r.user_id,'Поездка отменена',`${ride.origin} → ${ride.destination}: поездка отменена`,ride.id)}});return {ok:true};}
-function handleApi(req,path,data){const method=req.method;
+async function handleApi(req,path,data){const method=req.method;
  if(path==='/api/health' && method==='GET')return {ok:true,backend:'sqlite',version:'0.2'};
  if(path==='/api/register' && method==='POST'){
    checkRate(clientIp(req));const uname=clean(data.username,33).toLowerCase();if(!usernameValid(uname)||!passwordValid(data.password))throw jsonError('Логин должен содержать 3–32 символа, пароль — не менее 8');
    if(q('SELECT id FROM users WHERE username=?',uname))throw jsonError('Этот логин уже занят',409);
-   const id=uid(),salt=crypto.randomBytes(20).toString('hex');try{run('INSERT INTO users(id,username,salt,hash,name,role,created) VALUES(?,?,?,?,?,?,?)',id,uname,salt,saltHash(data.password,salt),uname,'user',now())}catch{throw jsonError('Не удалось создать аккаунт',409)}
+   const id=uid(),salt=crypto.randomBytes(20).toString('hex');try{run('INSERT INTO users(id,username,salt,hash,name,role,created) VALUES(?,?,?,?,?,?,?)',id,uname,salt,await saltHash(data.password,salt),uname,'user',now())}catch{throw jsonError('Не удалось создать аккаунт',409)}
    return loggedIn(q('SELECT * FROM users WHERE id=?',id));
  }
  if(path==='/api/login' && method==='POST'){
    checkRate(clientIp(req));const uname=clean(data.username,33).toLowerCase();const user=q('SELECT * FROM users WHERE username=?',uname);
-   const salt=user?.salt||'no-user-salt',expected=user?.hash||'0'.repeat(128),actual=saltHash(String(data.password||''),salt);
+   const salt=user?.salt||'no-user-salt',expected=user?.hash||'0'.repeat(128),actual=await saltHash(String(data.password||''),salt);
    if(!user||!crypto.timingSafeEqual(Buffer.from(expected,'hex'),Buffer.from(actual,'hex')))throw jsonError('Неверный логин или пароль',401);
    return loggedIn(user);
  }
@@ -236,7 +256,7 @@ const server=http.createServer(async(req,res)=>{
   if(req.method==='OPTIONS'){res.writeHead(origin&&!allowedOrigins.has(origin)?403:204);res.end();return;}
   if(origin&&!allowedOrigins.has(origin)&&reqUrl.pathname.startsWith('/api/'))throw jsonError('Origin не разрешён',403);
   if(reqUrl.pathname==='/config.js'){res.writeHead(200,{'content-type':'text/javascript; charset=utf-8','cache-control':'no-store'});res.end('window.PO_PUTI_BACKEND = true;');return;}
-  if(reqUrl.pathname.startsWith('/api/')){const data=req.method==='POST'?await parseBody(req):{};const output=handleApi(req,reqUrl.pathname,data);send(res,output);return;}
+  if(reqUrl.pathname.startsWith('/api/')){const data=req.method==='POST'?await parseBody(req):{};const output=await handleApi(req,reqUrl.pathname,data);send(res,output);return;}
   if(req.method==='GET'||req.method==='HEAD')return await serveStatic(req,res,reqUrl.pathname);
   throw jsonError('Метод не поддерживается',405);
  }catch(error){if(!res.headersSent){send(res,{error:error.status?error.message:'Внутренняя ошибка сервера'},error.status||500)}else res.end();if(!error.status)console.error(error)}
@@ -245,7 +265,7 @@ const PORT=Number(process.env.PORT||8080),HOST=process.env.HOST||'127.0.0.1';
 if(process.env.ADMIN_USERNAME&&process.env.ADMIN_PASSWORD){
  const uname=process.env.ADMIN_USERNAME.toLowerCase();if(!usernameValid(uname)||!passwordValid(process.env.ADMIN_PASSWORD))throw Error('Invalid ADMIN_USERNAME or ADMIN_PASSWORD (minimum 8 chars)');
  let admin=q('SELECT * FROM users WHERE username=?',uname);
- if(!admin){const salt=crypto.randomBytes(20).toString('hex');run('INSERT INTO users(id,username,salt,hash,name,role,created) VALUES(?,?,?,?,?,?,?)',uid(),uname,salt,saltHash(process.env.ADMIN_PASSWORD,salt),'Администратор','admin',now());console.log('Administrator account created:',uname)}
+ if(!admin){const salt=crypto.randomBytes(20).toString('hex');run('INSERT INTO users(id,username,salt,hash,name,role,created) VALUES(?,?,?,?,?,?,?)',uid(),uname,salt,await saltHash(process.env.ADMIN_PASSWORD,salt),'Администратор','admin',now());console.log('Administrator account created:',uname)}
  else if(admin.role!=='admin')console.error('Admin username already exists without admin role; not escalating');
 }
 server.listen(PORT,HOST,()=>console.log(`По пути API running at http://${HOST}:${PORT}; database at ${DATA}`));
