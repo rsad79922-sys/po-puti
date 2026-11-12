@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#ffffff">
+<title>По пути — проверка запуска</title><style>
+body{margin:0;background:#fff;color:#141b3b;font:16px/1.5 -apple-system,system-ui,Arial,sans-serif}
+#diagnostic{position:relative;z-index:99999;background:#edf7f7;border-bottom:2px solid #168a85;padding:16px;white-space:pre-wrap;overflow-wrap:anywhere}
+#diagnostic strong{display:block;font-size:20px;margin-bottom:7px}#app{min-height:50vh}
+</style></head><body>
+<div id="diagnostic"><strong>По пути — проверка запуска</strong><span id="report">HTML загрузился. Проверяем JavaScript…</span></div><div id="app"></div>
+<script>
+(function(){
+ var report=document.getElementById('report');
+ window.reportStartup=function(message){report.textContent+='\n'+message;};
+ window.addEventListener('error',function(event){
+   reportStartup('ОШИБКА: '+(event.message||'загрузка ресурса')+'; файл: '+(event.filename||event.target&&event.target.src||'неизвестен')+'; строка: '+(event.lineno||'?'));
+ },true);
+ window.addEventListener('unhandledrejection',function(event){reportStartup('ОШИБКА Promise: '+String(event.reason));});
+ setTimeout(function(){
+   var root=document.getElementById('app');
+   reportStartup('Через 8 секунд: '+(root&&root.children.length?'интерфейс нарисован ('+root.children.length+' элементов)':'интерфейс НЕ нарисован'));
+ },8000);
+})();
+</script>
+<script src="./config.js?v=start8" onload="reportStartup('config.js загружен')" onerror="reportStartup('ОШИБКА загрузки config.js')"></script>
+<script src="./app.js?v=start8" defer onload="reportStartup('app.js загружен и выполнен')" onerror="reportStartup('ОШИБКА загрузки app.js')"></script>
+</body></html>
