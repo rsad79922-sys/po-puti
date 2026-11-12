@@ -30,6 +30,8 @@ jobs:
           node --check www/app.js
           node --check www/sw.js
           node --check server/server.mjs
+      - name: Audit source syntax, URLs, CSS and nginx punctuation
+        run: node tests/source-audit.mjs
       - name: Validate browser bootstrap invariants
         run: node tests/pwa-bootstrap.mjs
       - name: Check anonymous and returning-session startup
