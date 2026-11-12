@@ -53,7 +53,32 @@ const api = async (path, method='GET', payload) => {
  }catch(error){if(error.name==='AbortError')throw new Error('Сервер долго не отвечает. Повторите запрос.');throw error}
  finally{if(timeout)clearTimeout(timeout)}
 };
-async function refreshRemote(){if(!remoteMode)return;try{const data=await api('/state');db={...data,search:db.search||{from:'',to:'',date:''},searchSubmitted:db.searchSubmitted||false,draft:db.draft||null};serverError='';if(me()?.role==='admin'){adminData=await api('/admin/overview').catch(()=>null)}render()}catch(err){if(err.status===401){accessToken='';localStorage.removeItem(TOKEN_STORE);db.currentUserId=null;navigate('/login')}serverError=err.message;render()}};
+let activeRefresh=null;
+function refreshRemote(){
+ if(!remoteMode)return Promise.resolve();
+ // Focus, background timer and login may request the same state simultaneously.
+ // Never run concurrent full-state downloads or overwrite newer responses.
+ if(activeRefresh)return activeRefresh;
+ activeRefresh=(async()=>{
+  try{
+   const data=await api('/state');
+   db={...data,search:db.search||{from:'',to:'',date:''},searchSubmitted:db.searchSubmitted||false,draft:db.draft||null};
+   serverError='';
+   if(me()?.role==='admin')adminData=await api('/admin/overview').catch(()=>null);
+   render();
+  }catch(err){
+   if(err.status===401){
+    accessToken='';
+    localStorage.removeItem(TOKEN_STORE);
+    db.currentUserId=null;
+    navigate('/login');
+   }
+   serverError=err.message;
+   render();
+  }
+ })();
+ return activeRefresh.finally(()=>{activeRefresh=null});
+}
 async function mutateRemote(path,payload,success){try{await api(path,'POST',payload);await refreshRemote();if(success)toast(success);return true}catch(err){toast(err.message);return false}};
 async function demoHash(pwd){const value=DEMO_HASH_SALT+pwd;const buf=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(value));return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('')};
 const me = () => db.users.find(u=>u.id === db.currentUserId);
