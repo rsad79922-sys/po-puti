@@ -53,7 +53,38 @@ const api = async (path, method='GET', payload) => {
  }catch(error){if(error.name==='AbortError')throw new Error('Сервер долго не отвечает. Повторите запрос.');throw error}
  finally{if(timeout)clearTimeout(timeout)}
 };
-async function refreshRemote(){if(!remoteMode)return;try{const data=await api('/state');db={...data,search:db.search||{from:'',to:'',date:''},searchSubmitted:db.searchSubmitted||false,draft:db.draft||null};serverError='';if(me()?.role==='admin'){adminData=await api('/admin/overview').catch(()=>null)}render()}catch(err){if(err.status===401){accessToken='';localStorage.removeItem(TOKEN_STORE);db.currentUserId=null;navigate('/login')}serverError=err.message;render()}};
+let stateRefreshInFlight=null;
+let lastStateSuccessAt=0;
+// Safari can fire focus while the foreground timer and a mutation refresh are
+// already downloading /state. Share the same request instead of racing updates.
+function refreshRemote(){
+ if(!remoteMode)return Promise.resolve();
+ if(stateRefreshInFlight)return stateRefreshInFlight;
+ const sessionToken=accessToken;
+ stateRefreshInFlight=(async()=>{
+  try{
+   const data=await api('/state');
+   // Ignore a response that belongs to a session which was signed out.
+   if(sessionToken!==accessToken)return;
+   db={...data,search:db.search||{from:'',to:'',date:''},searchSubmitted:db.searchSubmitted||false,draft:db.draft||null};
+   serverError='';
+   lastStateSuccessAt=Date.now();
+   if(me()?.role==='admin')adminData=await api('/admin/overview').catch(()=>null);
+   render();
+  }catch(err){
+   if(sessionToken!==accessToken)return;
+   if(err.status===401){
+    accessToken='';
+    localStorage.removeItem(TOKEN_STORE);
+    db.currentUserId=null;
+    navigate('/login');
+   }
+   serverError=err.message;
+   render();
+  }
+ })().finally(()=>{stateRefreshInFlight=null});
+ return stateRefreshInFlight;
+}
 async function mutateRemote(path,payload,success){try{await api(path,'POST',payload);await refreshRemote();if(success)toast(success);return true}catch(err){toast(err.message);return false}};
 async function demoHash(pwd){const value=DEMO_HASH_SALT+pwd;const buf=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(value));return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('')};
 const me = () => db.users.find(u=>u.id === db.currentUserId);
@@ -288,8 +319,8 @@ document.addEventListener('change',async ev=>{
 window.addEventListener('hashchange',()=>{render();scrollTo({top:0})});
 window.addEventListener('online',()=>{render();toast('Соединение восстановлено')});
 window.addEventListener('offline',()=>render());
-setInterval(()=>{if(remoteMode&&accessToken&&navigator.onLine&&document.visibilityState==='visible'&&!document.querySelector('.overlay')&&!['INPUT','TEXTAREA','SELECT'].includes(document.activeElement?.tagName))refreshRemote()},15000);
-window.addEventListener('focus',()=>{if(remoteMode&&accessToken&&navigator.onLine)refreshRemote()});
+setInterval(()=>{if(remoteMode&&accessToken&&navigator.onLine&&document.visibilityState==='visible'&&!document.querySelector('.overlay')&&!['INPUT','TEXTAREA','SELECT'].includes(document.activeElement?.tagName))refreshRemote()},45000);
+window.addEventListener('focus',()=>{if(remoteMode&&accessToken&&navigator.onLine&&Date.now()-lastStateSuccessAt>15000)refreshRemote()});
 window.addEventListener('storage',event=>{if(event.key===STORE){try{db=JSON.parse(event.newValue)||seed();render()}catch{}}});
 if(!location.hash)location.hash='/search';if(remoteMode){let localUI={};try{localUI=JSON.parse(safeStorage.getItem('po-puti-ui-v2')||'{}')}catch{localUI={}};db={currentUserId:null,users:[],rides:[],requests:[],notifications:[],reviews:[],messages:[],reports:[],search:localUI.search||{from:'Москва',to:'Санкт-Петербург',date:today(1)},searchSubmitted:true,draft:localUI.draft||null};if(accessToken){render();refreshRemote()}else{navigate('/login');render()}}else{save();render()};
 // Service Worker update is managed by index.html only; never delay app rendering.
