@@ -163,7 +163,11 @@ async function serveStatic(req,res,pathname){
  if(appScreen.test(path) && String(req.headers.accept||'').includes('text/html')) path='/index.html';
  const file=resolve(WEB,'.'+path);
  if(!file.startsWith(WEB+sep))throw jsonError('Доступ запрещён',403);
- if(!existsSync(file))throw jsonError('Файл не найден',404);
+ if(!existsSync(file)){
+   // Path only: do not log query strings, passwords or auth headers.
+   if(String(req.headers.accept||'').includes('text/html')) console.warn('[navigation-404]',req.method,pathname.slice(0,180));
+   throw jsonError('Файл не найден',404);
+ }
  const mime={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.json':'application/json','.webmanifest':'application/manifest+json','.svg':'image/svg+xml','.png':'image/png'};
  const body=await readFile(file);
  res.writeHead(200,{'content-type':mime[extname(file)]||'application/octet-stream','x-content-type-options':'nosniff','cache-control':extname(file)==='.html'?'no-store':'no-cache','content-length':body.length});
