@@ -2,6 +2,7 @@ import dns from 'node:dns/promises';
 import https from 'node:https';
 const hostname='vputipoputka.ru';
 console.log('NETWORK_DIAGNOSTIC_UTC',new Date().toISOString());
+console.log('Repeat independent external check after reliability audit, Nov 13');
 for(const type of ['resolve4','resolve6']){
  try{console.log(type,await dns[type](hostname))}
  catch(e){console.log(type,'ERROR',e.code||e.message)}
