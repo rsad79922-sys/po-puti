@@ -7,7 +7,9 @@
 <p>Если вы видите этот текст, браузер получил HTML с сервера.</p>
 <p id="js" class="status">JavaScript: ещё не проверен.</p><p id="files" class="status">Файлы: проверка не запущена.</p><p id="error" class="status">Ошибки: пока нет.</p>
 <button type="button" onclick="checkFiles()">Проверить файлы</button>
-<a href="/?refresh=mobile6#/login">Открыть приложение</a>
+<button type="button" onclick="resetPwa()">Сбросить кэш приложения и открыть</button>
+<a href="/?refresh=mobile6#/login">Открыть приложение без сброса</a>
+<p id="reset" class="status">PWA: не проверено.</p>
 <small>Эта страница ничего не изменяет в аккаунтах и поездках. Для проверки не нужно вводить пароль.</small>
 <script>
 (function(){
@@ -28,5 +30,27 @@ async function checkFiles(){
    }catch(e){items.push(list[i]+': ОШИБКА '+String(e));}
    out.textContent=items.join('\n');out.style.whiteSpace='pre-wrap';
  }
+}
+async function resetPwa(){
+ var out=document.getElementById('reset');
+ out.textContent='Проверяем старые версии PWA…';
+ try {
+   var registrations= ('serviceWorker' in navigator) ? await navigator.serviceWorker.getRegistrations() : [];
+   var removed=0;
+   for(var i=0;i<registrations.length;i++){
+     if(registrations[i].scope.indexOf(location.origin)===0){
+       await registrations[i].unregister();removed++;
+     }
+   }
+   var cacheRemoved=0;
+   if('caches' in window){
+     var names=await caches.keys();
+     for(var j=0;j<names.length;j++){
+       if(names[j].indexOf('po-puti-shell-')===0){await caches.delete(names[j]);cacheRemoved++;}
+     }
+   }
+   out.textContent='Сброшено: '+removed+' service worker, '+cacheRemoved+' кэшей. Открываем приложение…';
+   location.replace('/?refresh=mobile6&cacheclear='+Date.now()+'#/login');
+ }catch(e){out.textContent='Сброс кэша не удался: '+String(e);}
 }
 </script></body></html>
