@@ -155,12 +155,19 @@ function handleApi(req,path,data){const method=req.method;
  }
  throw jsonError('Маршрут API не найден',404);
 }
-async function serveStatic(res,pathname){let path=pathname==='/'?'/index.html':pathname;
+// Direct links to application screens must load the SPA shell, not JSON 404.
+const appScreen = /^\/(?:login|search|publish|trips|notifications|profile|admin|ride\/[^/]+|reviews\/[^/]+|chat\/[^/]+\/[^/]+)\/?$/;
+async function serveStatic(req,res,pathname){
+ let path=pathname==='/'?'/index.html':pathname;
  try{path=decodeURIComponent(path)}catch{throw jsonError('Неверный путь',400)}
- const file=resolve(WEB,'.'+path);if(!file.startsWith(WEB+sep))throw jsonError('Доступ запрещён',403);
+ if(appScreen.test(path) && String(req.headers.accept||'').includes('text/html')) path='/index.html';
+ const file=resolve(WEB,'.'+path);
+ if(!file.startsWith(WEB+sep))throw jsonError('Доступ запрещён',403);
  if(!existsSync(file))throw jsonError('Файл не найден',404);
  const mime={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.json':'application/json','.webmanifest':'application/manifest+json','.svg':'image/svg+xml','.png':'image/png'};
- res.writeHead(200,{'content-type':mime[extname(file)]||'application/octet-stream','x-content-type-options':'nosniff','cache-control':'no-cache'});res.end(await readFile(file));
+ const body=await readFile(file);
+ res.writeHead(200,{'content-type':mime[extname(file)]||'application/octet-stream','x-content-type-options':'nosniff','cache-control':extname(file)==='.html'?'no-store':'no-cache','content-length':body.length});
+ res.end(req.method==='HEAD'?undefined:body);
 }
 const server=http.createServer(async(req,res)=>{
  const reqUrl=new URL(req.url,'http://localhost');const origin=req.headers.origin;
@@ -171,7 +178,7 @@ const server=http.createServer(async(req,res)=>{
   if(origin&&!allowedOrigins.has(origin)&&reqUrl.pathname.startsWith('/api/'))throw jsonError('Origin не разрешён',403);
   if(reqUrl.pathname==='/config.js'){res.writeHead(200,{'content-type':'text/javascript; charset=utf-8','cache-control':'no-store'});res.end('window.PO_PUTI_BACKEND = true;');return;}
   if(reqUrl.pathname.startsWith('/api/')){const data=req.method==='POST'?await parseBody(req):{};const output=handleApi(req,reqUrl.pathname,data);send(res,output);return;}
-  if(req.method==='GET'||req.method==='HEAD')return await serveStatic(res,reqUrl.pathname);
+  if(req.method==='GET'||req.method==='HEAD')return await serveStatic(req,res,reqUrl.pathname);
   throw jsonError('Метод не поддерживается',405);
  }catch(error){if(!res.headersSent){send(res,{error:error.status?error.message:'Внутренняя ошибка сервера'},error.status||500)}else res.end();if(!error.status)console.error(error)}
 });
