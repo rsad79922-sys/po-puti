@@ -16,10 +16,21 @@ body{margin:0;background:#fff;color:#141b3b;font:16px/1.5 -apple-system,system-u
  window.addEventListener('unhandledrejection',function(event){reportStartup('ОШИБКА Promise: '+String(event.reason));});
  setTimeout(function(){
    var root=document.getElementById('app');
-   reportStartup('Через 8 секунд: '+(root&&root.children.length?'интерфейс нарисован ('+root.children.length+' элементов)':'интерфейс НЕ нарисован'));
+   reportStartup('До запуска приложения через 8 секунд: '+(root&&root.children.length?'интерфейс нарисован ('+root.children.length+' элементов)':'интерфейс НЕ нарисован'));
  },8000);
 })();
 </script>
 <script src="./config.js?v=start8" onload="reportStartup('config.js загружен')" onerror="reportStartup('ОШИБКА загрузки config.js')"></script>
-<script src="./app.js?v=start8" defer onload="reportStartup('app.js загружен и выполнен')" onerror="reportStartup('ОШИБКА загрузки app.js')"></script>
+<p style="padding:14px"><button type="button" id="launch" style="padding:14px 18px;background:#141b3b;color:white;border:0;border-radius:10px;font-size:17px">Проверить запуск приложения</button></p>
+<script>
+document.getElementById('launch').addEventListener('click',function(){
+ this.disabled=true;
+ reportStartup('Пользователь запустил app.js. Проверяем выполнение…');
+ var script=document.createElement('script');
+ script.src='./app.js?v=start9';
+ script.onload=function(){reportStartup('app.js: выполнение завершено')};
+ script.onerror=function(){reportStartup('ОШИБКА: app.js не загрузился')};
+ document.body.appendChild(script);
+});
+</script>
 </body></html>
