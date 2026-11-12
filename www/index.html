@@ -10,7 +10,7 @@
   <link rel="manifest" href="./manifest.webmanifest">
   <link rel="icon" href="./icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="./icons/icon-192.png">
-  <link rel="stylesheet" href="./styles.css?v=mobile5">
+  <link rel="stylesheet" href="./styles.css?v=mobile7">
   <title>По пути — едем вместе</title>
 </head>
 <body>
@@ -21,10 +21,12 @@
       window.poPutiLoadError=function(message){
         failure=true;
         var root=document.getElementById('app');
-        if(root) root.innerHTML='<main style="padding:28px 20px;font-family:system-ui,-apple-system,sans-serif;color:#141b3b"><h2>Не удалось открыть «По пути»</h2><p>'+String(message||'Ошибка загрузки страницы').replace(/[<>&]/g,'')+'</p><p><a href="/?refresh=mobile5" style="color:#087d77">Повторить загрузку</a></p></main>';
+        if(root) root.innerHTML='<main style="padding:28px 20px;font-family:system-ui,-apple-system,sans-serif;color:#141b3b"><h2>Не удалось открыть «По пути»</h2><p>'+String(message||'Ошибка загрузки страницы').replace(/[<>&]/g,'')+'</p><p><a href="/?refresh=mobile7" style="color:#087d77">Повторить загрузку</a></p></main>';
       };
       window.addEventListener('error',function(event){
-        if(event && event.filename && /app\\.js/.test(event.filename))window.poPutiLoadError('Ошибка запуска интерфейса. Попробуйте обновить страницу.');
+        if(!event || !event.filename) return;
+        var line=event.lineno || '?';
+        window.poPutiLoadError('Ошибка выполнения JavaScript (строка '+line+'). Попробуйте обновить страницу.');
       });
       /* Starts immediately: Safari's load event may never fire if a resource stalls. */
       setTimeout(function(){
@@ -40,7 +42,7 @@
       },7000);
     })();
   </script>
-  <script src="./config.js?v=mobile5" onload="this.dataset.status='загружен'" onerror="this.dataset.status='ошибка';window.poPutiLoadError('Не удалось загрузить настройки приложения')"></script>
-  <script src="./app.js?v=mobile5" defer onload="this.dataset.status='загружен'" onerror="window.poPutiLoadError&&window.poPutiLoadError('Не удалось загрузить файл приложения. Проверьте подключение и обновите страницу.')"></script>
+  <script src="./config.js?v=mobile7" onload="this.dataset.status='загружен'" onerror="this.dataset.status='ошибка';window.poPutiLoadError('Не удалось загрузить настройки приложения')"></script>
+  <script src="./app.js?v=mobile7" defer onload="this.dataset.status='загружен'" onerror="window.poPutiLoadError&&window.poPutiLoadError('Не удалось загрузить файл приложения. Проверьте подключение и обновите страницу.')"></script>
 </body>
 </html>
