@@ -57,6 +57,10 @@ jobs:
         run: node tests/audit-api-android.mjs
       - name: Audit Safari sessions and refresh after committed writes
         run: node tests/audit-refresh-after-write.mjs
+      - name: Test Safari post-mutation state freshness and latency races
+        run: node tests/state-refresh-after-mutation.mjs
+      - name: Validate reversible HTTPS diagnostics shell syntax
+        run: bash -n deploy/temporary-https-mss-test.sh
       - name: Check anonymous and returning-session startup
         run: node tests/mobile-startup.mjs
       - name: Run real WebKit iPhone-sized browser smoke
