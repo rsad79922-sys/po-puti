@@ -2,62 +2,79 @@
 <html lang="ru">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#141b3b">
-  <meta name="description" content="По пути — находите попутчиков для междугородних поездок по России">
-  <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <link rel="manifest" href="./manifest.webmanifest">
-  <link rel="icon" href="./icons/icon.svg" type="image/svg+xml">
-  <link rel="apple-touch-icon" href="./icons/icon-192.png">
+  <meta name="description" content="По пути — совместные междугородние поездки">
+  <title>По пути — едем вместе</title>
   <style>
     html,body{margin:0;min-height:100%;background:#f5f7fb;color:#141b3b;font-family:system-ui,-apple-system,Arial,sans-serif}
     #app{min-height:70vh}
-    .startup-status{padding:24px 20px;font-size:16px}
+    #startup{padding:24px 20px;font-size:16px}
+    #startup h1{font-size:26px}
+    #startup a{color:#087d77}
   </style>
-  <title>По пути — едем вместе</title>
 </head>
 <body>
-  <div id="app"><main style="padding:28px 20px;font-family:system-ui,-apple-system,sans-serif;color:#141b3b"><h1 style="font-size:24px">По пути</h1><p>Загружаем приложение…</p></main></div>
+  <div id="app"></div>
+  <div id="startup" role="status" aria-live="polite">
+    <h1>По пути</h1>
+    <p id="startup-message">Открываем приложение…</p>
+  </div>
   <script>
-    (function(){
-      var failure=false;
-      window.poPutiLoadError=function(message){
-        failure=true;
-        var root=document.getElementById('app');
-        if(root) root.innerHTML='<main style="padding:28px 20px;font-family:system-ui,-apple-system,sans-serif;color:#141b3b"><h2>Не удалось открыть «По пути»</h2><p>'+String(message||'Ошибка загрузки страницы').replace(/[<>&]/g,'')+'</p><p><a href="/?refresh=mobile8" style="color:#087d77">Повторить загрузку</a></p></main>';
-      };
-      window.addEventListener('error',function(event){
-        if(!event || !event.filename) return;
-        var line=event.lineno || '?';
-        window.poPutiLoadError('Ошибка выполнения JavaScript (строка '+line+'). Попробуйте обновить страницу.');
-      });
-      /* Starts immediately: Safari's load event may never fire if a resource stalls. */
-      setTimeout(function(){
-        var root=document.getElementById('app');
-        if(!failure && root && root.textContent.indexOf('Загружаем приложение')!==-1){
-          var scripts=document.querySelectorAll('script[src]');
-          var loaded=[];
-          for(var i=0;i<scripts.length;i++){
-            loaded.push(scripts[i].src.split('/').pop()+': '+(scripts[i].dataset.status||'ожидание'));
-          }
-          window.poPutiLoadError('Приложение не запустилось. Проверка: '+loaded.join('; '));
-        }
-      },7000);
-    })();
+  (function(){
+    var message=document.getElementById('startup-message');
+    var box=document.getElementById('startup');
+    var root=document.getElementById('app');
+    var finished=false;
+    function status(text){message.textContent=text;}
+    function fail(text){
+      if(finished)return;
+      status(text);
+      var a=document.createElement('a');
+      a.href='/mobile-check.html';
+      a.textContent='Проверить подключение';
+      box.appendChild(a);
+    }
+    function completed(){
+      if(root.children.length){
+        finished=true;
+        box.style.display='none';
+        var css=document.createElement('link');
+        css.rel='stylesheet';
+        css.href='/styles.css?v=mobile9';
+        css.onerror=function(){box.style.display='block';status('Интерфейс открыт, но оформление пока недоступно.')};
+        document.head.appendChild(css);
+        var manifest=document.createElement('link');
+        manifest.rel='manifest';manifest.href='/manifest.webmanifest';
+        document.head.appendChild(manifest);
+      }else fail('Приложение не нарисовало интерфейс.');
+    }
+    window.addEventListener('error',function(e){
+      if(!finished && e && e.message) fail('Ошибка запуска JavaScript (строка '+(e.lineno||'?')+'): '+String(e.message).slice(0,160));
+    });
+    window.addEventListener('unhandledrejection',function(e){
+      if(!finished)fail('Ошибка запуска: '+String(e.reason||'неизвестная причина').slice(0,160));
+    });
+    function loadApp(){
+      status('Запускаем экран входа…');
+      var script=document.createElement('script');
+      script.src='/app.js?v=mobile9';
+      script.onload=completed;
+      script.onerror=function(){fail('Файл приложения не загрузился.')};
+      document.body.appendChild(script);
+    }
+    /* Same dynamic-load sequence that successfully rendered the login on iPhone. */
+    function loadConfig(){
+      status('Получаем настройки…');
+      var script=document.createElement('script');
+      script.src='/config.js?v=mobile9';
+      script.onload=loadApp;
+      script.onerror=function(){fail('Настройки приложения недоступны.')};
+      document.body.appendChild(script);
+    }
+    setTimeout(function(){if(!finished)fail('Загрузка длится слишком долго.');},12000);
+    setTimeout(loadConfig,50);
+  })();
   </script>
-  <script>
-    /* Non-blocking stylesheet: Safari can display the login UI even if CSS retrieval stalls. */
-    (function(){
-      var link=document.createElement('link');
-      link.rel='stylesheet';
-      link.href='./styles.css?v=mobile8';
-      link.onload=function(){document.documentElement.setAttribute('data-style','ready')};
-      link.onerror=function(){document.documentElement.setAttribute('data-style','failed')};
-      document.head.appendChild(link);
-    })();
-  </script>
-  <script src="./config.js?v=mobile8" onload="this.dataset.status='загружен'" onerror="this.dataset.status='ошибка';window.poPutiLoadError('Не удалось загрузить настройки приложения')"></script>
-  <script src="./app.js?v=mobile8" defer onload="this.dataset.status='загружен'" onerror="window.poPutiLoadError&&window.poPutiLoadError('Не удалось загрузить файл приложения. Проверьте подключение и обновите страницу.')"></script>
 </body>
 </html>
