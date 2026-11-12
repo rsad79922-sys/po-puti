@@ -65,10 +65,21 @@ function publicRide(r){return {id:r.id,driverId:r.driver_id,from:r.origin,to:r.d
 function isoDay(){return new Date().toISOString().slice(0,10)}
 function parseBody(req){return new Promise((resolve,reject)=>{let size=0,parts=[];req.on('data',c=>{size+=c.length;if(size>1_100_000){reject(jsonError('Слишком большой запрос',413));req.destroy();return;}parts.push(c)});req.on('end',()=>{try{resolve(JSON.parse(Buffer.concat(parts).toString('utf8')||'{}'))}catch{reject(jsonError('Некорректные данные'))}});req.on('error',reject)});}
 function send(res,data,status=200){res.writeHead(status,{'content-type':'application/json; charset=utf-8','cache-control':'no-store'});res.end(JSON.stringify(data))}
-function state(actor){const myRideIds=rows('SELECT id FROM rides WHERE driver_id=?',actor.id).map(x=>x.id);const reqs=rows('SELECT * FROM requests WHERE user_id=? OR ride_id IN (SELECT id FROM rides WHERE driver_id=?) ORDER BY created DESC',actor.id,actor.id);
- const peers=new Set([actor.id]);for(const r of reqs){if(r.status==='accepted'){const ride=q('SELECT driver_id FROM rides WHERE id=?',r.ride_id);if(ride){peers.add(ride.driver_id);peers.add(r.user_id)}}}
- const users=rows('SELECT id,username,name,phone,car,photo,role FROM users').map(u=>({...u,phone:peers.has(u.id)?u.phone:''}));
+function state(actor){const reqs=rows('SELECT * FROM requests WHERE user_id=? OR ride_id IN (SELECT id FROM rides WHERE driver_id=?) ORDER BY created DESC',actor.id,actor.id);
  const rides=rows('SELECT * FROM rides ORDER BY date,time').map(publicRide);
+ const visibleIds=new Set([actor.id,...rides.map(r=>r.driverId)]);
+ const peers=new Set([actor.id]);
+ for(const r of reqs){
+   visibleIds.add(r.user_id); // A driver must see people who requested their rides.
+   if(r.status==='accepted'){
+     const ride=q('SELECT driver_id FROM rides WHERE id=?',r.ride_id);
+     if(ride){visibleIds.add(ride.driver_id);peers.add(ride.driver_id);peers.add(r.user_id)}
+   }
+ }
+ // Do not disclose every registered account to unrelated passengers.
+ const users=rows('SELECT id,username,name,phone,car,photo,role FROM users')
+   .filter(u=>visibleIds.has(u.id))
+   .map(u=>({...u,phone:peers.has(u.id)?u.phone:''}));
  const notifications=rows('SELECT * FROM notifications WHERE recipient_id=? ORDER BY created DESC LIMIT 300',actor.id).map(n=>({id:n.id,to:n.recipient_id,title:n.title,message:n.message,rideId:n.ride_id,read:!!n.read,created:n.created}));
  const reviews=rows('SELECT r.*,u.name author FROM reviews r JOIN users u ON u.id=r.author_id ORDER BY r.created DESC').map(r=>({id:r.id,rideId:r.ride_id,driverId:r.driver_id,authorId:r.author_id,author:r.author,score:r.score,text:r.text,date:new Date(r.created).toISOString().slice(0,10)}));
  const messages=rows('SELECT * FROM messages WHERE from_id=? OR to_id=? ORDER BY created DESC LIMIT 1000',actor.id,actor.id).map(m=>({id:m.id,rideId:m.ride_id,fromId:m.from_id,toId:m.to_id,text:m.text,created:m.created}));
