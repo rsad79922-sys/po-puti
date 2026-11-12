@@ -1,0 +1,19 @@
+name: Public HTTPS soak check
+on:
+  push:
+    branches: [diagnostics/https-intermittent-20261112]
+    paths: [tests/network-soak.mjs,.github/workflows/network-soak.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  soak:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Probe from GitHub every 5 seconds
+        run: node tests/network-soak.mjs
