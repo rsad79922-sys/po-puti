@@ -51,6 +51,8 @@ jobs:
         run: node tests/server-full-flow.mjs
       - name: Test profile and car photos in isolated SQLite
         run: node tests/photo-upload.mjs
+      - name: Check no overlapping Safari API state refresh
+        run: node tests/refresh-singleflight.mjs
       - name: Check anonymous and returning-session startup
         run: node tests/mobile-startup.mjs
       - name: Run real WebKit iPhone-sized browser smoke
