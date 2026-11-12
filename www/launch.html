@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#141b3b">
+<title>По пути — запуск</title>
+<style>
+html,body{margin:0;min-height:100%;background:#f5f7fb;color:#141b3b;font:16px/1.5 -apple-system,BlinkMacSystemFont,system-ui,Arial,sans-serif}
+#launcher{padding:24px 20px;margin:auto;max-width:520px}
+#launcher h1{font-size:28px;margin:6px 0 8px}
+#launcher p{margin:12px 0}
+#launcher button{width:100%;border:0;border-radius:14px;background:#141b3b;color:white;font-size:18px;font-weight:600;padding:16px;cursor:pointer}
+#launcher .error{color:#9f2444}
+</style>
+</head>
+<body>
+<main id="launcher"><h1>По пути</h1><p id="notice">Нажмите кнопку, чтобы открыть приложение.</p>
+<button id="start" type="button">Открыть «По пути»</button>
+<p id="details" aria-live="polite"></p>
+</main>
+<div id="app"></div>
+<script>
+(function(){
+var start=document.getElementById('start'),notice=document.getElementById('notice'),details=document.getElementById('details');
+var started=false;
+function message(text){details.textContent=text}
+function problem(text){start.disabled=false;start.textContent='Попробовать ещё раз';notice.textContent='Не удалось открыть приложение.';details.className='error';message(text)}
+window.addEventListener('error',function(e){if(started)problem('Ошибка JavaScript: '+(e.message||'неизвестная')+' (строка '+(e.lineno||'?')+')');});
+window.addEventListener('unhandledrejection',function(e){if(started)problem('Ошибка запроса: '+String(e.reason||'неизвестная'));});
+start.onclick=function(){
+ started=true;start.disabled=true;start.textContent='Открываем…';message('Загружаем настройки');
+ var config=document.createElement('script');config.src='/config.js?v=launch10';
+ config.onerror=function(){problem('Не удалось загрузить config.js')};
+ config.onload=function(){
+  message('Запускаем интерфейс');
+  var app=document.createElement('script');app.src='/app.js?v=launch10';
+  app.onerror=function(){problem('Не удалось загрузить app.js')};
+  app.onload=function(){
+   if(!document.querySelector('#app .shell')){problem('app.js выполнился, но не создал интерфейс');return}
+   var css=document.createElement('link');css.rel='stylesheet';css.href='/styles.css?v=launch10';
+   css.onerror=function(){message('Интерфейс открыт, но стили не загрузились')};
+   document.head.appendChild(css);
+   document.getElementById('launcher').remove();
+  };
+  document.body.appendChild(app);
+ };
+ document.body.appendChild(config);
+};
+})();
+</script>
+</body></html>
