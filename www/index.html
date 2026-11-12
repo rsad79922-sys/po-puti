@@ -59,7 +59,7 @@
       boot.remove();
       var style=document.createElement('link');
       style.rel='stylesheet';
-      style.href='/styles.css?v=boot11';
+      style.href='/styles.css?v=boot12';
       document.head.appendChild(style);
       var icon=document.createElement('link');
       icon.rel='icon';icon.href='/icons/icon.svg';icon.type='image/svg+xml';
@@ -71,7 +71,7 @@
     function loadApp(){
       status('Запускаем приложение…');
       var script=document.createElement('script');
-      script.src='/app.js?v=boot11';
+      script.src='/app.js?v=boot12';
       script.onload=ready;
       script.onerror=function(){fail('Не удалось загрузить app.js. Проверьте подключение.')};
       document.body.appendChild(script);
@@ -79,9 +79,18 @@
     function start(){
       if(started)return;
       started=true;
+      // Production PWA uses a same-origin API. An extra config.js request is
+      // unnecessary and has failed intermittently in iPhone Safari.
+      if(window.location.hostname==='vputipoputka.ru'){
+        window.PO_PUTI_BACKEND=true;
+        window.PO_PUTI_API_BASE='';
+        loadApp();
+        return;
+      }
+      // Standalone Android / local preview retain their existing config.js.
       status('Загружаем настройки…');
       var config=document.createElement('script');
-      config.src='/config.js?v=boot11';
+      config.src='/config.js?v=boot12';
       config.onload=loadApp;
       config.onerror=function(){fail('Не удалось загрузить config.js. Проверьте подключение.')};
       document.body.appendChild(config);
