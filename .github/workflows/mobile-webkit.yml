@@ -1,0 +1,38 @@
+name: Mobile WebKit startup
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'www/**'
+      - 'tests/**'
+      - '.github/workflows/mobile-webkit.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  mobile-webkit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install browser test tooling
+        run: npm install --no-save --ignore-scripts playwright@1.65.0
+      - name: Install WebKit with dependencies
+        run: npx playwright install --with-deps webkit
+      - name: Check JavaScript syntax
+        run: |
+          node --check www/app.js
+          node --check www/sw.js
+          node --check server/server.mjs
+      - name: Validate browser bootstrap invariants
+        run: node tests/pwa-bootstrap.mjs
+      - name: Check anonymous and returning-session startup
+        run: node tests/mobile-startup.mjs
+      - name: Run real WebKit iPhone-sized browser smoke
+        run: node tests/browser-webkit.mjs
