@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#ffffff">
+<title>По пути — проверка мобильного браузера</title>
+<style>body{background:#fff;color:#141b3b;font:16px/1.5 system-ui,-apple-system,Arial,sans-serif;padding:24px;margin:0}h1{font-size:24px}p{overflow-wrap:anywhere}.status{padding:12px;border-radius:9px;background:#eef7f7;margin:12px 0}button,a{display:block;padding:12px;margin:12px 0;border-radius:9px;background:#141b3b;color:#fff;text-decoration:none;border:0;font-size:16px}small{color:#576174}</style></head>
+<body><h1>По пути · проверка загрузки</h1>
+<p>Если вы видите этот текст, браузер получил HTML с сервера.</p>
+<p id="js" class="status">JavaScript: ещё не проверен.</p><p id="files" class="status">Файлы: проверка не запущена.</p><p id="error" class="status">Ошибки: пока нет.</p>
+<button type="button" onclick="checkFiles()">Проверить файлы</button>
+<a href="/?refresh=mobile6#/login">Открыть приложение</a>
+<small>Эта страница ничего не изменяет в аккаунтах и поездках. Для проверки не нужно вводить пароль.</small>
+<script>
+(function(){
+ var el=document.getElementById('js');
+ el.textContent='JavaScript: работает. User agent: '+navigator.userAgent.slice(0,160);
+ window.onerror=function(message,source,line){document.getElementById('error').textContent='Ошибка JS: '+message+' (строка '+line+')';};
+})();
+async function checkFiles(){
+ var list=['/','/index.html','/styles.css?v=mobile5','/config.js?v=mobile5','/app.js?v=mobile5','/api/health'];
+ var out=document.getElementById('files');out.textContent='Проверяем…';
+ var items=[];
+ for(var i=0;i<list.length;i++){
+   try{
+     var url=list[i],resp=await fetch(url,{cache:'no-store'});
+     var type=resp.headers.get('content-type')||'неизвестен';
+     var body=await resp.text();
+     items.push(url+': HTTP '+resp.status+', '+type+', '+body.length+' символов');
+   }catch(e){items.push(list[i]+': ОШИБКА '+String(e));}
+   out.textContent=items.join('\n');out.style.whiteSpace='pre-wrap';
+ }
+}
+</script></body></html>
