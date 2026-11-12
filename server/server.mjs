@@ -62,6 +62,19 @@ function loggedIn(actor){const token=crypto.randomBytes(32).toString('base64url'
 function rideById(id){const ride=q('SELECT * FROM rides WHERE id=?',id);if(!ride)throw jsonError('Поездка не найдена',404);return ride}
 function confirmed(rideId,id1,id2){const ride=q('SELECT driver_id FROM rides WHERE id=?',rideId);return Boolean(ride&&((ride.driver_id===id1 && q("SELECT id FROM requests WHERE ride_id=? AND user_id=? AND status='accepted'",rideId,id2))||(ride.driver_id===id2&&q("SELECT id FROM requests WHERE ride_id=? AND user_id=? AND status='accepted'",rideId,id1))));}
 function publicRide(r){return {id:r.id,driverId:r.driver_id,from:r.origin,to:r.destination,date:r.date,time:r.time,seats:r.seats,price:r.price,car:r.car,pickup:r.pickup,dropoff:r.dropoff,luggage:r.luggage,comment:r.comment,photo:r.photo,cancelled:!!r.cancelled};}
+function checkedPhoto(value, maxBytes){
+ if(value===undefined||value===null||value==='')return '';
+ if(typeof value!=='string'||value.length>Math.ceil(maxBytes*4/3)+80)throw jsonError('Слишком большое фото',413);
+ const match=value.match(/^data:image\/(jpeg|png|webp);base64,([A-Za-z0-9+/]+={0,2})$/);
+ if(!match)throw jsonError('Допустимы только JPEG, PNG или WebP (HEIC преобразуйте в JPEG)');
+ const bytes=Buffer.from(match[2],'base64');
+ if(!bytes.length||bytes.length>maxBytes||bytes.toString('base64')!==match[2])throw jsonError('Некорректное фото или превышен размер',413);
+ const jpg=match[1]==='jpeg'&&bytes.length>=3&&bytes[0]===0xff&&bytes[1]===0xd8&&bytes[2]===0xff;
+ const png=match[1]==='png'&&bytes.length>=8&&bytes.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10]));
+ const webp=match[1]==='webp'&&bytes.length>=12&&bytes.toString('ascii',0,4)==='RIFF'&&bytes.toString('ascii',8,12)==='WEBP';
+ if(!jpg&&!png&&!webp)throw jsonError('Формат изображения не соответствует файлу');
+ return value;
+}
 function isoDay(){return new Date().toISOString().slice(0,10)}
 function parseBody(req){return new Promise((resolve,reject)=>{let size=0,parts=[];req.on('data',c=>{size+=c.length;if(size>1_100_000){reject(jsonError('Слишком большой запрос',413));req.destroy();return;}parts.push(c)});req.on('end',()=>{try{resolve(JSON.parse(Buffer.concat(parts).toString('utf8')||'{}'))}catch{reject(jsonError('Некорректные данные'))}});req.on('error',reject)});}
 function send(res,data,status=200){res.writeHead(status,{'content-type':'application/json; charset=utf-8','cache-control':'no-store'});res.end(JSON.stringify(data))}
@@ -107,22 +120,7 @@ function handleApi(req,path,data){const method=req.method;
    const name=clean(data.name,60),car=clean(data.car,90),phone=clean(data.phone,24);
    if(!name)throw jsonError('Укажите имя');
    if(phone&&!/^[+\d ()-]{7,24}$/.test(phone))throw jsonError('Неверный формат телефона');
-   let photo=actor.photo||'';
-   if(Object.hasOwn(data,'photo')){
-     if(data.photo==='') photo='';
-     else {
-       if(typeof data.photo!=='string'||data.photo.length>410000)throw jsonError('Слишком большое фото (максимум 300 КБ)',413);
-       const match=data.photo.match(/^data:image\/(jpeg|png|webp);base64,([A-Za-z0-9+/]+={0,2})$/);
-       if(!match)throw jsonError('Допустимы только JPEG, PNG или WebP');
-       const bytes=Buffer.from(match[2],'base64');
-       if(!bytes.length||bytes.length>300000||bytes.toString('base64')!==match[2])throw jsonError('Некорректное фото или превышен размер 300 КБ',413);
-       const jpg=match[1]==='jpeg'&&bytes[0]===0xff&&bytes[1]===0xd8;
-       const png=match[1]==='png'&&bytes.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10]));
-       const webp=match[1]==='webp'&&bytes.toString('ascii',0,4)==='RIFF'&&bytes.toString('ascii',8,12)==='WEBP';
-       if(!jpg&&!png&&!webp)throw jsonError('Формат изображения не соответствует файлу');
-       photo=data.photo;
-     }
-   }
+   const photo=Object.hasOwn(data,'photo')?checkedPhoto(data.photo,300000):actor.photo||'';
    run('UPDATE users SET name=?,car=?,phone=?,photo=? WHERE id=?',name,car,phone,photo,actor.id);return {ok:true};
  }
  if(path==='/api/rides'&&method==='POST'){
@@ -131,7 +129,7 @@ function handleApi(req,path,data){const method=req.method;
    if(!from||!to||from.toLowerCase()===to.toLowerCase()||!/^\d{4}-\d{2}-\d{2}$/.test(date)||!/^\d{2}:\d{2}$/.test(time)||date<isoDay()||!Number.isInteger(seats)||seats<1||seats>7||(!data.negotiable&&(!Number.isInteger(price)||price<0||price>100000))||!car)throw jsonError('Проверьте маршрут, дату, места, стоимость и автомобиль');
    const key=clean(data.clientKey,80);if(key&&!/^[a-zA-Z0-9_-]{10,80}$/.test(key))throw jsonError('Неверный идентификатор операции');
    return transaction(()=>{if(key){const prev=q('SELECT ride_id FROM ride_operations WHERE user_id=? AND client_key=?',actor.id,key);if(prev)return {id:prev.ride_id,repeated:true};}
-   const id=uid();run('INSERT INTO rides VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',id,actor.id,from,to,date,time,seats,price,car,clean(data.pickup,150),clean(data.dropoff,150),clean(data.luggage,60),clean(data.comment,550),'',0,now());if(key)run('INSERT INTO ride_operations VALUES(?,?,?)',actor.id,key,id);return {id};});
+   const id=uid();run('INSERT INTO rides VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',id,actor.id,from,to,date,time,seats,price,car,clean(data.pickup,150),clean(data.dropoff,150),clean(data.luggage,60),clean(data.comment,550),checkedPhoto(data.photo,120000),0,now());if(key)run('INSERT INTO ride_operations VALUES(?,?,?)',actor.id,key,id);return {id};});
  }
  if(path==='/api/requests'&&method==='POST'){
    const ride=rideById(clean(data.rideId,100));if(ride.cancelled||ride.driver_id===actor.id||ride.date<isoDay())throw jsonError('Нельзя отправить заявку на эту поездку',409);
