@@ -5,6 +5,8 @@ on:
     branches: [main]
     paths:
       - 'www/**'
+      - 'server/**'
+      - 'deploy/**'
       - 'tests/**'
       - '.github/workflows/mobile-webkit.yml'
   workflow_dispatch:
@@ -34,6 +36,10 @@ jobs:
         run: node tests/source-audit.mjs
       - name: Validate browser bootstrap invariants
         run: node tests/pwa-bootstrap.mjs
+      - name: Verify Android shared API configuration
+        run: node tests/native-config.mjs
+      - name: Test isolated production server routing
+        run: node tests/server-routing.mjs
       - name: Check anonymous and returning-session startup
         run: node tests/mobile-startup.mjs
       - name: Run real WebKit iPhone-sized browser smoke
