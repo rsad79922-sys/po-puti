@@ -239,6 +239,7 @@ async function serveStatic(req,res,pathname){
 }
 const server=http.createServer(async(req,res)=>{
  const startTime=Date.now();
+ try{
  const reqUrl=new URL(req.url,'http://localhost');const origin=req.headers.origin;
  // Log only slow/aborted API requests, never tokens, IPs, URLs with query or bodies.
  if(reqUrl.pathname.startsWith('/api/')){
@@ -252,7 +253,6 @@ const server=http.createServer(async(req,res)=>{
  }
  if(origin&&allowedOrigins.has(origin)){res.setHeader('access-control-allow-origin',origin);res.setHeader('vary','Origin');res.setHeader('access-control-allow-headers','Content-Type, Authorization');res.setHeader('access-control-allow-methods','GET, POST, OPTIONS')}
  res.setHeader('x-content-type-options','nosniff');res.setHeader('referrer-policy','strict-origin-when-cross-origin');
- try{
   if(req.method==='OPTIONS'){res.writeHead(origin&&!allowedOrigins.has(origin)?403:204);res.end();return;}
   if(origin&&!allowedOrigins.has(origin)&&reqUrl.pathname.startsWith('/api/'))throw jsonError('Origin не разрешён',403);
   if(reqUrl.pathname==='/config.js'){res.writeHead(200,{'content-type':'text/javascript; charset=utf-8','cache-control':'no-store'});res.end('window.PO_PUTI_BACKEND = true;');return;}
