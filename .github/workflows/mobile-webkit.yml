@@ -40,6 +40,8 @@ jobs:
         run: node tests/native-config.mjs
       - name: Test isolated production server routing
         run: node tests/server-routing.mjs
+      - name: Diagnose real public DNS, TLS and HTTPS from GitHub network
+        run: node tests/public-connectivity.mjs
       - name: Test isolated multi-user booking and security
         run: node tests/server-full-flow.mjs
       - name: Check anonymous and returning-session startup
