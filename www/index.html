@@ -2,78 +2,97 @@
 <html lang="ru">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#141b3b">
   <meta name="description" content="По пути — совместные междугородние поездки">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <title>По пути — едем вместе</title>
   <style>
-    html,body{margin:0;min-height:100%;background:#f5f7fb;color:#141b3b;font-family:system-ui,-apple-system,Arial,sans-serif}
-    #app{min-height:70vh}
-    #startup{padding:24px 20px;font-size:16px}
-    #startup h1{font-size:26px}
-    #startup a{color:#087d77}
+    html,body{margin:0;min-height:100%;background:#f5f7fb;color:#141b3b;font:16px/1.5 -apple-system,system-ui,Arial,sans-serif}
+    #app{min-height:0}
+    #boot{max-width:480px;padding:28px 20px;margin:0 auto}
+    #boot h1{font-size:28px;margin:0 0 12px}
+    #boot p{margin:0 0 16px;overflow-wrap:anywhere}
+    #boot button{background:#141b3b;color:#fff;border:0;border-radius:12px;padding:12px 18px;font:inherit;cursor:pointer}
+    #boot a{color:#087d77}
   </style>
 </head>
 <body>
   <div id="app"></div>
-  <div id="startup" role="status" aria-live="polite">
+  <main id="boot" role="status" aria-live="polite">
     <h1>По пути</h1>
-    <p id="startup-message">Открываем приложение…</p>
-  </div>
+    <p id="boot-message">Открываем приложение…</p>
+    <button type="button" id="boot-retry" style="display:none">Повторить загрузку</button>
+  </main>
+  <noscript>Для работы приложения «По пути» необходимо включить JavaScript.</noscript>
   <script>
   (function(){
-    var message=document.getElementById('startup-message');
-    var box=document.getElementById('startup');
     var root=document.getElementById('app');
-    var finished=false;
-    function status(text){message.textContent=text;}
+    var boot=document.getElementById('boot');
+    var notice=document.getElementById('boot-message');
+    var retry=document.getElementById('boot-retry');
+    var done=false,started=false;
+    function status(text){notice.textContent=text;}
     function fail(text){
-      if(finished)return;
+      if(done)return;
       status(text);
-      var a=document.createElement('a');
-      a.href='/mobile-check.html';
-      a.textContent='Проверить подключение';
-      box.appendChild(a);
+      retry.style.display='inline-block';
     }
-    function completed(){
-      if(root.children.length){
-        finished=true;
-        box.style.display='none';
-        var css=document.createElement('link');
-        css.rel='stylesheet';
-        css.href='/styles.css?v=mobile9';
-        css.onerror=function(){box.style.display='block';status('Интерфейс открыт, но оформление пока недоступно.')};
-        document.head.appendChild(css);
-        var manifest=document.createElement('link');
-        manifest.rel='manifest';manifest.href='/manifest.webmanifest';
-        document.head.appendChild(manifest);
-      }else fail('Приложение не нарисовало интерфейс.');
+    retry.addEventListener('click',function(){
+      var url=new URL(window.location.href);
+      url.searchParams.set('reload',String(Date.now()));
+      window.location.assign(url.toString());
+    });
+    window.addEventListener('error',function(event){
+      if(!done && event && event.message)fail('Ошибка запуска: '+String(event.message).slice(0,180)+' (строка '+(event.lineno||'?')+')');
+    });
+    window.addEventListener('unhandledrejection',function(event){
+      if(!done)fail('Ошибка загрузки: '+String(event.reason||'неизвестная ошибка').slice(0,180));
+    });
+    function ready(){
+      if(!root.querySelector('.shell')){
+        fail('JavaScript загрузился, но не создал интерфейс.');
+        return;
+      }
+      done=true;
+      boot.remove();
+      var style=document.createElement('link');
+      style.rel='stylesheet';
+      style.href='/styles.css?v=boot11';
+      document.head.appendChild(style);
+      var icon=document.createElement('link');
+      icon.rel='icon';icon.href='/icons/icon.svg';icon.type='image/svg+xml';
+      document.head.appendChild(icon);
+      var manifest=document.createElement('link');
+      manifest.rel='manifest';manifest.href='/manifest.webmanifest';
+      document.head.appendChild(manifest);
     }
-    window.addEventListener('error',function(e){
-      if(!finished && e && e.message) fail('Ошибка запуска JavaScript (строка '+(e.lineno||'?')+'): '+String(e.message).slice(0,160));
-    });
-    window.addEventListener('unhandledrejection',function(e){
-      if(!finished)fail('Ошибка запуска: '+String(e.reason||'неизвестная причина').slice(0,160));
-    });
     function loadApp(){
-      status('Запускаем экран входа…');
+      status('Запускаем приложение…');
       var script=document.createElement('script');
-      script.src='/app.js?v=mobile9';
-      script.onload=completed;
-      script.onerror=function(){fail('Файл приложения не загрузился.')};
+      script.src='/app.js?v=boot11';
+      script.onload=ready;
+      script.onerror=function(){fail('Не удалось загрузить app.js. Проверьте подключение.')};
       document.body.appendChild(script);
     }
-    /* Same dynamic-load sequence that successfully rendered the login on iPhone. */
-    function loadConfig(){
-      status('Получаем настройки…');
-      var script=document.createElement('script');
-      script.src='/config.js?v=mobile9';
-      script.onload=loadApp;
-      script.onerror=function(){fail('Настройки приложения недоступны.')};
-      document.body.appendChild(script);
+    function start(){
+      if(started)return;
+      started=true;
+      status('Загружаем настройки…');
+      var config=document.createElement('script');
+      config.src='/config.js?v=boot11';
+      config.onload=loadApp;
+      config.onerror=function(){fail('Не удалось загрузить config.js. Проверьте подключение.')};
+      document.body.appendChild(config);
     }
-    setTimeout(function(){if(!finished)fail('Загрузка длится слишком долго.');},12000);
-    setTimeout(loadConfig,50);
+    /* Do not block navigation on CSS, manifest or a service worker. */
+    setTimeout(start,60);
+    setTimeout(function(){if(!done)fail('Загрузка длится слишком долго. Нажмите «Повторить загрузку».');},10000);
+    if('serviceWorker' in navigator){
+      navigator.serviceWorker.register('/sw.js',{updateViaCache:'none'})
+        .then(function(reg){return reg.update()}).catch(function(){});
+    }
   })();
   </script>
 </body>
