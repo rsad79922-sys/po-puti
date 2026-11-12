@@ -14,6 +14,7 @@ on:
     paths:
       - 'www/**'
       - 'server/**'
+      - 'deploy/**'
       - 'tests/**'
       - '.github/workflows/mobile-webkit.yml'
   workflow_dispatch:
