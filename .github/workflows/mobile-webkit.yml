@@ -53,6 +53,10 @@ jobs:
         run: node tests/photo-upload.mjs
       - name: Check no overlapping Safari API state refresh
         run: node tests/refresh-singleflight.mjs
+      - name: Audit API safety, dates and real Android-origin CORS
+        run: node tests/audit-api-android.mjs
+      - name: Audit Safari sessions and refresh after committed writes
+        run: node tests/audit-refresh-after-write.mjs
       - name: Check anonymous and returning-session startup
         run: node tests/mobile-startup.mjs
       - name: Run real WebKit iPhone-sized browser smoke
