@@ -147,7 +147,16 @@ function state(actor){
   }
  }
  const notifications=rows('SELECT * FROM notifications WHERE recipient_id=? ORDER BY created DESC LIMIT 300',actor.id).map(n=>({id:n.id,to:n.recipient_id,title:n.title,message:n.message,rideId:n.ride_id,read:!!n.read,created:n.created}));
- const reviews=rows('SELECT r.*,u.name author FROM reviews r JOIN users u ON u.id=r.author_id ORDER BY r.created DESC').map(r=>({id:r.id,rideId:r.ride_id,driverId:r.driver_id,authorId:r.author_id,author:r.author,score:r.score,text:r.text,date:new Date(r.created).toISOString().slice(0,10)}));
+ // Only expose reviews belonging to drivers in this user's visible rides.
+ // Global review scans made unrelated historical data part of every /state poll.
+ const visibleReviews=[];
+ for(let i=0;i<visible.length;i+=400){
+  const batch=visible.slice(i,i+400);
+  const placeholders=batch.map(()=>'?').join(',');
+  visibleReviews.push(...rows('SELECT r.*,u.name author FROM reviews r JOIN users u ON u.id=r.author_id WHERE r.driver_id IN ('+placeholders+') ORDER BY r.created DESC',...batch));
+ }
+ visibleReviews.sort((a,b)=>b.created-a.created);
+ const reviews=visibleReviews.map(r=>({id:r.id,rideId:r.ride_id,driverId:r.driver_id,authorId:r.author_id,author:r.author,score:r.score,text:r.text,date:new Date(r.created).toISOString().slice(0,10)}));
  const messages=rows('SELECT * FROM messages WHERE from_id=? OR to_id=? ORDER BY created DESC LIMIT 1000',actor.id,actor.id).map(m=>({id:m.id,rideId:m.ride_id,fromId:m.from_id,toId:m.to_id,text:m.text,created:m.created}));
  return {currentUserId:actor.id,users,rides,requests:reqs.map(r=>({id:r.id,rideId:r.ride_id,userId:r.user_id,status:r.status,created:r.created})),notifications,reviews,messages,reports:[]};
 }
