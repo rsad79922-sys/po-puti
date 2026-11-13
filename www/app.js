@@ -44,11 +44,27 @@ if (!db || !Array.isArray(db.users) || !Array.isArray(db.rides)) db = seed();
 const save = () => {try {if (remoteMode) {localStorage.setItem('po-puti-ui-v2',JSON.stringify({search:db.search,searchSubmitted:db.searchSubmitted,draft:db.draft}));} else localStorage.setItem(STORE,JSON.stringify(db));}catch {toast('Не удалось сохранить локальные настройки.');}};
 const api = async (path, method='GET', payload) => {
  const controller=typeof AbortController!=='undefined'?new AbortController():null;
- const timeout=controller?setTimeout(()=>controller.abort(),12000):null;
+ const timeoutMs=path==='/state' && method==='GET'?30000:12000;
+ const timeout=controller?setTimeout(()=>controller.abort(),timeoutMs):null;
  try {
   const res=await fetch(SERVER_BASE+'/api'+path,{method,headers:{'Content-Type':'application/json',...(accessToken?{'Authorization':'Bearer '+accessToken}:{})},body:payload===undefined?undefined:JSON.stringify(payload),cache:'no-store',...(controller?{signal:controller.signal}:{})});
-  const data=await res.json().catch(()=>({}));
-  if(!res.ok){const err=new Error(data.error||'Ошибка сервера ('+res.status+')');err.status=res.status;throw err}
+  let data;
+  try{
+   data=await res.json();
+  }catch(error){
+   if(error.name==='AbortError')throw error;
+   const err=new Error('Сервер вернул некорректный JSON');
+   if(!res.ok)err.status=res.status;
+   throw err;
+  }
+  if(!res.ok){
+   const err=new Error(typeof data?.error==='string'?data.error:'Ошибка сервера ('+res.status+')');
+   err.status=res.status;
+   throw err;
+  }
+  if(!data || typeof data!=='object' || Array.isArray(data)){
+   throw new Error('Сервер вернул некорректный ответ');
+  }
   return data;
  }catch(error){if(error.name==='AbortError')throw new Error('Сервер долго не отвечает. Повторите запрос.');throw error}
  finally{if(timeout)clearTimeout(timeout)}
@@ -73,6 +89,22 @@ async function refreshRemote({fresh=false}={}){
   try{
    const data=await api('/state');
    if(sessionToken!==accessToken)return false;
+   const collections=['users','rides','requests','notifications','reviews','messages','reports'];
+   const stringFields={
+    users:['id','name','phone'],
+    rides:['id','driverId','from','to','date','time'],
+    requests:['id','rideId','userId','status'],
+    notifications:['id','to','title','message'],
+    reviews:['id','driverId','author','text','date'],
+    messages:['id','rideId','fromId','toId','text'],
+    reports:['id']
+   };
+   const validState=typeof data.currentUserId==='string' &&
+    collections.every(key=>Array.isArray(data[key]) && data[key].every(item=>
+     item!==null && typeof item==='object' && !Array.isArray(item) &&
+     stringFields[key].every(field=>typeof item[field]==='string')
+    )) && data.users.some(user=>user.id===data.currentUserId);
+   if(!validState)throw new Error('Сервер вернул неполные или некорректные данные. Сохранены предыдущие данные.');
    db={...data,search:db.search||{from:'',to:'',date:''},searchSubmitted:db.searchSubmitted||false,draft:db.draft||null};
    serverError='';
    lastStateSuccessAt=Date.now();
