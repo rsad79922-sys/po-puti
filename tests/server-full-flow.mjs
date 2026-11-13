@@ -8,6 +8,7 @@ import {mkdtemp,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import crypto from 'node:crypto';
+import {DatabaseSync} from 'node:sqlite';
 
 const temp=await mkdtemp(join(tmpdir(),'po-puti-flow-'));
 const port=20000+Math.floor(Math.random()*30000);
@@ -43,8 +44,24 @@ try{
  const outsider=await ok('/register','POST',{username:'out_'+suffix,password:'correct-horse-battery-staple'});
  await ok('/profile','POST',{name:'Водитель',phone:'+79991110000',car:'Toyota'},driver.token);
  await ok('/profile','POST',{name:'Пассажир',phone:'+79992220000'},passenger.token);
+ // Seed one legitimate completed trip/review outside the first driver's scope.
+ // /state must include it for the participant but NOT leak it to unrelated users.
+ const outsiderRideId=crypto.randomUUID(),outsiderReviewId=crypto.randomUUID();
+ const historical=new Date(Date.now()-4*86400000).toISOString().slice(0,10);
+ const historicalAt=Date.now()-4*86400000;
+ const fixture=new DatabaseSync(join(temp,'po-puti.sqlite'));
+ try {
+  fixture.prepare('INSERT INTO rides(id,driver_id,origin,destination,date,time,seats,price,car,created) VALUES(?,?,?,?,?,?,?,?,?,?)')
+   .run(outsiderRideId,outsider.user.id,'Уфа','Ижевск',historical,'10:00',2,1000,'Ford',historicalAt);
+  fixture.prepare('INSERT INTO requests VALUES(?,?,?,?,?)')
+   .run(crypto.randomUUID(),outsiderRideId,passenger.user.id,'accepted',historicalAt);
+  fixture.prepare('INSERT INTO reviews VALUES(?,?,?,?,?,?,?)')
+   .run(outsiderReviewId,outsiderRideId,outsider.user.id,passenger.user.id,5,'Отличная поездка',Date.now()-86400000);
+ } finally {fixture.close();}
  const dState=await ok('/state','GET',undefined,driver.token);
  const pState=await ok('/state','GET',undefined,passenger.token);
+ assert(!dState.reviews.some(r=>r.id===outsiderReviewId),'unrelated historical driver review leaked');
+ assert(pState.reviews.some(r=>r.id===outsiderReviewId),'passenger lost review of their past driver');
  assert(!dState.users.some(u=>u.id===outsider.user.id),'unrelated user leaked to driver');
  assert(!pState.users.some(u=>u.id===outsider.user.id),'unrelated user leaked to passenger');
  const travelDate=new Date(Date.now()+3*86400000).toISOString().slice(0,10);
