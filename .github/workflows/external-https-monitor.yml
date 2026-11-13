@@ -1,0 +1,57 @@
+name: External production TLS diagnostic
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/external-https-monitor.yml'
+  workflow_dispatch:
+  schedule:
+    - cron: '17,47 * * * *'
+
+permissions:
+  contents: read
+
+jobs:
+  independent-https:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - name: Probe TLS 1.2 and 1.3 over DNS and pinned IPv4
+        shell: bash
+        run: |
+          set -uo pipefail
+          : > https-diagnostic.log
+          echo "UTC start $(date -u '+%Y-%m-%dT%H:%M:%SZ')" | tee -a https-diagnostic.log
+          echo "IPv4 DNS:" | tee -a https-diagnostic.log
+          getent ahostsv4 vputipoputka.ru | tee -a https-diagnostic.log || true
+          failures=0
+          for attempt in 1 2 3; do
+            for version in 1.2 1.3; do
+              for route in dns pinned-ip; do
+                resolver=()
+                if [[ "$route" == pinned-ip ]]; then
+                  resolver=(--resolve vputipoputka.ru:443:130.49.129.99)
+                fi
+                output="health-$attempt-$version-$route.json"
+                echo "CHECK attempt=$attempt tls=$version route=$route" | tee -a https-diagnostic.log
+                if curl -4 --noproxy '*' --fail --silent --show-error --connect-timeout 5 --max-time 14 --tlsv1."$version" --tls-max "$version"                     "${resolver[@]}" -H 'Accept: application/json' -H 'Cache-Control: no-cache'                     -o "$output" -w 'HTTP=%{http_code} TCP=%{time_connect}s TLS=%{time_appconnect}s TOTAL=%{time_total}s CERT=%{ssl_verify_result}\n'                     https://vputipoputka.ru/api/health 2>&1 | tee -a https-diagnostic.log                     && grep -Eq '"ok"[[:space:]]*:[[:space:]]*true' "$output"; then
+                  echo "PASS attempt=$attempt tls=$version route=$route" | tee -a https-diagnostic.log
+                else
+                  failures=$((failures + 1))
+                  echo "FAIL attempt=$attempt tls=$version route=$route" | tee -a https-diagnostic.log
+                fi
+              done
+            done
+            if [[ "$attempt" -lt 3 ]]; then sleep 2; fi
+          done
+          echo "RESULT failures=$failures / 12; a single successful run is not proof of long-term stability." | tee -a https-diagnostic.log
+          exit "$failures"
+      - name: Save diagnostic report including failures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: public-tls-report
+          path: https-diagnostic.log
+          if-no-files-found: ignore
+          retention-days: 14
