@@ -50,6 +50,8 @@ jobs:
         run: node tests/server-routing.mjs
       - name: Test isolated multi-user booking and security
         run: node tests/server-full-flow.mjs
+      - name: Test isolated WAL backup and restore safeguards
+        run: node tests/sqlite-backup.mjs
       - name: Test profile and car photos in isolated SQLite
         run: node tests/photo-upload.mjs
       - name: Check no overlapping Safari API state refresh
