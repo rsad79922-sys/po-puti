@@ -1,6 +1,10 @@
 name: External production TLS diagnostic
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/external-https-monitor.yml'
   pull_request:
     branches: [main]
     paths:
@@ -55,3 +59,39 @@ jobs:
           path: https-diagnostic.log
           if-no-files-found: ignore
           retention-days: 14
+
+  production-assets:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 6
+    steps:
+      - name: Repeated public HTML, JavaScript, CSS and API checks
+        shell: bash
+        run: |
+          set -uo pipefail
+          errors=0
+          for attempt in 1 2 3; do
+            for item in homepage javascript stylesheet worker health; do
+              case "$item" in
+                homepage) url='https://vputipoputka.ru/'; match='<html' ;;
+                javascript) url='https://vputipoputka.ru/app.js?v=boot12'; match='remoteMode' ;;
+                stylesheet) url='https://vputipoputka.ru/styles.css?v=boot12'; match='body' ;;
+                worker) url='https://vputipoputka.ru/sw.js'; match='addEventListener' ;;
+                health) url='https://vputipoputka.ru/api/health'; match='"ok"' ;;
+              esac
+              output="$(mktemp)"
+              echo "CHECK utc=$(date -u '+%FT%TZ') attempt=$attempt item=$item"
+              if curl -4 --noproxy '*' --fail --silent --show-error --connect-timeout 5 --max-time 12 \
+                -H 'Cache-Control: no-cache' -o "$output" \
+                -w 'HTTP=%{http_code} TCP=%{time_connect}s TLS=%{time_appconnect}s TOTAL=%{time_total}s\n' "$url" \
+                && test -s "$output" && grep -q "$match" "$output"; then
+                echo "PASS attempt=$attempt item=$item"
+              else
+                echo "FAIL attempt=$attempt item=$item"
+                errors=$((errors + 1))
+              fi
+              rm -f "$output"
+            done
+            if [ "$attempt" -lt 3 ]; then sleep 2; fi
+          done
+          echo "RESULT asset_failures=$errors / 15"
+          [ "$errors" -eq 0 ]
