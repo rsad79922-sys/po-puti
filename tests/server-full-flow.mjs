@@ -8,6 +8,7 @@ import {mkdtemp,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import crypto from 'node:crypto';
+import {DatabaseSync} from 'node:sqlite';
 
 const temp=await mkdtemp(join(tmpdir(),'po-puti-flow-'));
 const port=20000+Math.floor(Math.random()*30000);
@@ -41,14 +42,38 @@ try{
  const driver=await ok('/register','POST',{username:'drv_'+suffix,password:'correct-horse-battery-staple'});
  const passenger=await ok('/register','POST',{username:'psg_'+suffix,password:'correct-horse-battery-staple'});
  const outsider=await ok('/register','POST',{username:'out_'+suffix,password:'correct-horse-battery-staple'});
+ const historicalPassenger=await ok('/register','POST',{username:'hist_'+suffix,password:'correct-horse-battery-staple'});
  await ok('/profile','POST',{name:'Водитель',phone:'+79991110000',car:'Toyota'},driver.token);
  await ok('/profile','POST',{name:'Пассажир',phone:'+79992220000'},passenger.token);
+ // Seed one legitimate completed trip/review outside the first driver's scope.
+ // /state must include it for the participant but NOT leak it to unrelated users.
+ const outsiderRideId=crypto.randomUUID(),outsiderReviewId=crypto.randomUUID();
+ const historical=new Date(Date.now()-4*86400000).toISOString().slice(0,10);
+ const historicalAt=Date.now()-4*86400000;
+ const fixture=new DatabaseSync(join(temp,'po-puti.sqlite'));
+ try {
+  fixture.prepare('INSERT INTO rides(id,driver_id,origin,destination,date,time,seats,price,car,created) VALUES(?,?,?,?,?,?,?,?,?,?)')
+   .run(outsiderRideId,outsider.user.id,'Уфа','Ижевск',historical,'10:00',2,1000,'Ford',historicalAt);
+  fixture.prepare('INSERT INTO requests VALUES(?,?,?,?,?)')
+   .run(crypto.randomUUID(),outsiderRideId,historicalPassenger.user.id,'accepted',historicalAt);
+  fixture.prepare('INSERT INTO reviews VALUES(?,?,?,?,?,?,?)')
+   .run(outsiderReviewId,outsiderRideId,outsider.user.id,historicalPassenger.user.id,5,'Отличная поездка',Date.now()-86400000);
+ } finally {fixture.close();}
  const dState=await ok('/state','GET',undefined,driver.token);
  const pState=await ok('/state','GET',undefined,passenger.token);
+ const historicalState=await ok('/state','GET',undefined,historicalPassenger.token);
+ assert(!dState.reviews.some(r=>r.id===outsiderReviewId),'unrelated historical driver review leaked');
+ assert(historicalState.reviews.some(r=>r.id===outsiderReviewId),'past-trip passenger lost review of their driver');
+ assert(!pState.reviews.some(r=>r.id===outsiderReviewId),'unrelated review leaked to new passenger');
  assert(!dState.users.some(u=>u.id===outsider.user.id),'unrelated user leaked to driver');
  assert(!pState.users.some(u=>u.id===outsider.user.id),'unrelated user leaked to passenger');
  const travelDate=new Date(Date.now()+3*86400000).toISOString().slice(0,10);
  const rideBody={from:'Казань',to:'Самара',date:travelDate,time:'15:30',seats:2,price:900,car:'Toyota',clientKey:'ride_'+suffix};
+ // API must not accept impossible dates or times even if Android/UI validation is bypassed.
+ const impossibleDate=await request('/rides','POST',{...rideBody,date:'2099-02-30'},driver.token);
+ assert.equal(impossibleDate.status,400,'invalid calendar date was accepted');
+ const impossibleTime=await request('/rides','POST',{...rideBody,time:'29:77'},driver.token);
+ assert.equal(impossibleTime.status,400,'invalid departure time was accepted');
  const ride=await ok('/rides','POST',rideBody,driver.token);
  const duplicate=await ok('/rides','POST',rideBody,driver.token);
  assert.equal(ride.id,duplicate.id,'ride idempotency failed');

@@ -42,17 +42,34 @@ const now = () => Date.now();
 const clean = (value,max=120) => String(value||'').trim().slice(0,max);
 const usernameValid = v=>/^[a-z0-9_-]{3,32}$/.test(v);
 const passwordValid = v=>typeof v==='string' && v.length>=8 && v.length<=128;
-const saltHash = (password,salt) => crypto.scryptSync(password,salt,64,{N:32768,r:8,p:1,maxmem:64*1024*1024}).toString('hex');
+// Let the OpenSSL worker pool perform costly password derivation. Synchronous
+// scrypt in an HTTP callback blocks health checks and every other request.
+const saltHash = (password,salt) => new Promise((resolve,reject)=>{
+ crypto.scrypt(password,salt,64,{N:32768,r:8,p:1,maxmem:64*1024*1024},(err,key)=>{
+  if(err)reject(err);else resolve(key.toString('hex'));
+ });
+});
 const jsonError=(message,status=400)=>Object.assign(new Error(message),{status});
 const allowedOrigins = new Set((process.env.APP_ORIGINS||'https://localhost,capacitor://localhost,http://localhost:8080').split(',').map(v=>v.trim()).filter(Boolean));
 const limit = new Map();
+let lastRateSweep=0;
 function clientIp(req){
  const peer = req.socket.remoteAddress || '';
  const forwarded = String(req.headers['x-real-ip'] || '');
  const localProxy = ['127.0.0.1','::1','::ffff:127.0.0.1'].includes(peer);
  return localProxy && /^[0-9a-fA-F:.]{3,45}$/.test(forwarded) ? forwarded : peer;
 }
-function checkRate(ip){const t=Date.now(),r=limit.get(ip)||{start:t,count:0};if(t-r.start>15*60_000){r.start=t;r.count=0;}r.count++;limit.set(ip,r);if(r.count>55)throw jsonError('Слишком много попыток. Повторите позже.',429);}
+function checkRate(ip){
+ const t=Date.now();
+ if(t-lastRateSweep>15*60_000){
+  for(const [key,entry] of limit)if(t-entry.start>15*60_000)limit.delete(key);
+  lastRateSweep=t;
+ }
+ const r=limit.get(ip)||{start:t,count:0};
+ if(t-r.start>15*60_000){r.start=t;r.count=0;}
+ r.count++;limit.set(ip,r);
+ if(r.count>55)throw jsonError('Слишком много попыток. Повторите позже.',429);
+}
 function notify(recipient,title,message,rideId=''){run('INSERT INTO notifications VALUES(?,?,?,?,?,?,?)',uid(),recipient,title,message,rideId,0,now());}
 function transaction(fn){database.exec('BEGIN IMMEDIATE');try{const val=fn();database.exec('COMMIT');return val}catch(err){database.exec('ROLLBACK');throw err}}
 function getActor(req){const token=(req.headers.authorization||'').match(/^Bearer (\S+)$/)?.[1];if(!token)return null;return q('SELECT u.* FROM users u INNER JOIN sessions s ON s.user_id=u.id WHERE s.token_hash=? AND s.expires>?',sha(token),now())||null;}
@@ -76,40 +93,85 @@ function checkedPhoto(value, maxBytes){
  return value;
 }
 function isoDay(){return new Date().toISOString().slice(0,10)}
-function parseBody(req){return new Promise((resolve,reject)=>{let size=0,parts=[];req.on('data',c=>{size+=c.length;if(size>1_100_000){reject(jsonError('Слишком большой запрос',413));req.destroy();return;}parts.push(c)});req.on('end',()=>{try{resolve(JSON.parse(Buffer.concat(parts).toString('utf8')||'{}'))}catch{reject(jsonError('Некорректные данные'))}});req.on('error',reject)});}
+function parseBody(req){
+ return new Promise((resolve,reject)=>{
+  let size=0,parts=[],oversized=false;
+  req.on('data',chunk=>{
+   if(oversized)return;
+   size+=chunk.length;
+   if(size>1_100_000){
+    oversized=true;parts=[];reject(jsonError('Слишком большой запрос',413));
+    return; // Do not destroy the socket before the 413 response is sent.
+   }
+   parts.push(chunk);
+  });
+  req.on('end',()=>{
+   if(oversized)return;
+   try{
+    const parsed=JSON.parse(Buffer.concat(parts).toString('utf8')||'{}');
+    if(!parsed||typeof parsed!=='object'||Array.isArray(parsed))throw Error('Invalid JSON payload');
+    resolve(parsed);
+   }catch{reject(jsonError('Некорректные данные'))}
+  });
+  req.on('error',reject);
+  req.on('aborted',()=>reject(jsonError('Клиент прервал запрос',400)));
+ });
+}
 function send(res,data,status=200){res.writeHead(status,{'content-type':'application/json; charset=utf-8','cache-control':'no-store'});res.end(JSON.stringify(data))}
-function state(actor){const reqs=rows('SELECT * FROM requests WHERE user_id=? OR ride_id IN (SELECT id FROM rides WHERE driver_id=?) ORDER BY created DESC',actor.id,actor.id);
- const rides=rows('SELECT * FROM rides ORDER BY date,time').map(publicRide);
+function state(actor){
+ // One JOIN instead of an extra blocking SQLite lookup per accepted request.
+ const reqs=rows('SELECT req.*, rides.driver_id FROM requests req JOIN rides ON rides.id=req.ride_id WHERE req.user_id=? OR rides.driver_id=? ORDER BY req.created DESC',actor.id,actor.id);
+ // Discovery only needs upcoming rides, while each participant keeps access
+ // to their own historical rides (driver or passenger). This bounds growth of
+ // unrelated historical car photos in each recurring /state response.
+ const rides=rows('SELECT * FROM rides WHERE date>=? OR driver_id=? OR id IN (SELECT ride_id FROM requests WHERE user_id=?) ORDER BY date,time',isoDay(),actor.id,actor.id).map(publicRide);
  const visibleIds=new Set([actor.id,...rides.map(r=>r.driverId)]);
  const peers=new Set([actor.id]);
  for(const r of reqs){
-   visibleIds.add(r.user_id); // A driver must see people who requested their rides.
-   if(r.status==='accepted'){
-     const ride=q('SELECT driver_id FROM rides WHERE id=?',r.ride_id);
-     if(ride){visibleIds.add(ride.driver_id);peers.add(ride.driver_id);peers.add(r.user_id)}
-   }
+  visibleIds.add(r.user_id);
+  if(r.status==='accepted'){
+   visibleIds.add(r.driver_id);
+   peers.add(r.driver_id);
+   peers.add(r.user_id);
+  }
  }
- // Do not disclose every registered account to unrelated passengers.
- const users=rows('SELECT id,username,name,phone,car,photo,role FROM users')
-   .filter(u=>visibleIds.has(u.id))
-   .map(u=>({...u,phone:peers.has(u.id)?u.phone:''}));
+ // SQL must filter visible accounts BEFORE reading potentially large avatar BLOBs.
+ // Keep chunks below SQLite bind parameter limits without changing the API shape.
+ const visible=[...visibleIds];
+ const users=[];
+ for(let i=0;i<visible.length;i+=400){
+  const batch=visible.slice(i,i+400);
+  const placeholders=batch.map(()=>'?').join(',');
+  for(const u of rows('SELECT id,username,name,phone,car,photo,role FROM users WHERE id IN ('+placeholders+')',...batch)){
+   users.push({...u,phone:peers.has(u.id)?u.phone:''});
+  }
+ }
  const notifications=rows('SELECT * FROM notifications WHERE recipient_id=? ORDER BY created DESC LIMIT 300',actor.id).map(n=>({id:n.id,to:n.recipient_id,title:n.title,message:n.message,rideId:n.ride_id,read:!!n.read,created:n.created}));
- const reviews=rows('SELECT r.*,u.name author FROM reviews r JOIN users u ON u.id=r.author_id ORDER BY r.created DESC').map(r=>({id:r.id,rideId:r.ride_id,driverId:r.driver_id,authorId:r.author_id,author:r.author,score:r.score,text:r.text,date:new Date(r.created).toISOString().slice(0,10)}));
+ // Only expose reviews belonging to drivers in this user's visible rides.
+ // Global review scans made unrelated historical data part of every /state poll.
+ const visibleReviews=[];
+ for(let i=0;i<visible.length;i+=400){
+  const batch=visible.slice(i,i+400);
+  const placeholders=batch.map(()=>'?').join(',');
+  visibleReviews.push(...rows('SELECT r.*,u.name author FROM reviews r JOIN users u ON u.id=r.author_id WHERE r.driver_id IN ('+placeholders+') ORDER BY r.created DESC',...batch));
+ }
+ visibleReviews.sort((a,b)=>b.created-a.created);
+ const reviews=visibleReviews.map(r=>({id:r.id,rideId:r.ride_id,driverId:r.driver_id,authorId:r.author_id,author:r.author,score:r.score,text:r.text,date:new Date(r.created).toISOString().slice(0,10)}));
  const messages=rows('SELECT * FROM messages WHERE from_id=? OR to_id=? ORDER BY created DESC LIMIT 1000',actor.id,actor.id).map(m=>({id:m.id,rideId:m.ride_id,fromId:m.from_id,toId:m.to_id,text:m.text,created:m.created}));
  return {currentUserId:actor.id,users,rides,requests:reqs.map(r=>({id:r.id,rideId:r.ride_id,userId:r.user_id,status:r.status,created:r.created})),notifications,reviews,messages,reports:[]};
 }
 function cancelRide(ride,actor,asAdmin=false){if(ride.driver_id!==actor.id&&!asAdmin)throw jsonError('Недостаточно прав',403);if(ride.cancelled)throw jsonError('Поездка уже отменена',409);transaction(()=>{run('UPDATE rides SET cancelled=1 WHERE id=?',ride.id);for(const r of rows("SELECT * FROM requests WHERE ride_id=? AND status IN ('pending','accepted')",ride.id)){run("UPDATE requests SET status='cancelled' WHERE id=?",r.id);notify(r.user_id,'Поездка отменена',`${ride.origin} → ${ride.destination}: поездка отменена`,ride.id)}});return {ok:true};}
-function handleApi(req,path,data){const method=req.method;
+async function handleApi(req,path,data){const method=req.method;
  if(path==='/api/health' && method==='GET')return {ok:true,backend:'sqlite',version:'0.2'};
  if(path==='/api/register' && method==='POST'){
    checkRate(clientIp(req));const uname=clean(data.username,33).toLowerCase();if(!usernameValid(uname)||!passwordValid(data.password))throw jsonError('Логин должен содержать 3–32 символа, пароль — не менее 8');
    if(q('SELECT id FROM users WHERE username=?',uname))throw jsonError('Этот логин уже занят',409);
-   const id=uid(),salt=crypto.randomBytes(20).toString('hex');try{run('INSERT INTO users(id,username,salt,hash,name,role,created) VALUES(?,?,?,?,?,?,?)',id,uname,salt,saltHash(data.password,salt),uname,'user',now())}catch{throw jsonError('Не удалось создать аккаунт',409)}
+   const id=uid(),salt=crypto.randomBytes(20).toString('hex');try{run('INSERT INTO users(id,username,salt,hash,name,role,created) VALUES(?,?,?,?,?,?,?)',id,uname,salt,await saltHash(data.password,salt),uname,'user',now())}catch{throw jsonError('Не удалось создать аккаунт',409)}
    return loggedIn(q('SELECT * FROM users WHERE id=?',id));
  }
  if(path==='/api/login' && method==='POST'){
    checkRate(clientIp(req));const uname=clean(data.username,33).toLowerCase();const user=q('SELECT * FROM users WHERE username=?',uname);
-   const salt=user?.salt||'no-user-salt',expected=user?.hash||'0'.repeat(128),actual=saltHash(String(data.password||''),salt);
+   const salt=user?.salt||'no-user-salt',expected=user?.hash||'0'.repeat(128),actual=await saltHash(String(data.password||''),salt);
    if(!user||!crypto.timingSafeEqual(Buffer.from(expected,'hex'),Buffer.from(actual,'hex')))throw jsonError('Неверный логин или пароль',401);
    return loggedIn(user);
  }
@@ -126,7 +188,9 @@ function handleApi(req,path,data){const method=req.method;
  if(path==='/api/rides'&&method==='POST'){
    const from=clean(data.from,100),to=clean(data.to,100),date=clean(data.date,10),time=clean(data.time,5),car=clean(data.car,90);
    const seats=Number(data.seats),price=data.negotiable?null:Number(data.price);
-   if(!from||!to||from.toLowerCase()===to.toLowerCase()||!/^\d{4}-\d{2}-\d{2}$/.test(date)||!/^\d{2}:\d{2}$/.test(time)||date<isoDay()||!Number.isInteger(seats)||seats<1||seats>7||(!data.negotiable&&(!Number.isInteger(price)||price<0||price>100000))||!car)throw jsonError('Проверьте маршрут, дату, места, стоимость и автомобиль');
+    const validDate=/^\d{4}-\d{2}-\d{2}$/.test(date)&&!Number.isNaN(Date.parse(date+'T00:00:00Z'))&&new Date(date+'T00:00:00Z').toISOString().slice(0,10)===date;
+    const validTime=/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(time);
+   if(!from||!to||from.toLowerCase()===to.toLowerCase()||!validDate||!validTime||date<isoDay()||!Number.isInteger(seats)||seats<1||seats>7||(!data.negotiable&&(!Number.isInteger(price)||price<0||price>100000))||!car)throw jsonError('Проверьте маршрут, дату, места, стоимость и автомобиль');
    const key=clean(data.clientKey,80);if(key&&!/^[a-zA-Z0-9_-]{10,80}$/.test(key))throw jsonError('Неверный идентификатор операции');
    return transaction(()=>{if(key){const prev=q('SELECT ride_id FROM ride_operations WHERE user_id=? AND client_key=?',actor.id,key);if(prev)return {id:prev.ride_id,repeated:true};}
    const id=uid();run('INSERT INTO rides VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',id,actor.id,from,to,date,time,seats,price,car,clean(data.pickup,150),clean(data.dropoff,150),clean(data.luggage,60),clean(data.comment,550),checkedPhoto(data.photo,120000),0,now());if(key)run('INSERT INTO ride_operations VALUES(?,?,?)',actor.id,key,id);return {id};});
@@ -183,14 +247,25 @@ async function serveStatic(req,res,pathname){
  res.end(req.method==='HEAD'?undefined:body);
 }
 const server=http.createServer(async(req,res)=>{
+ const startTime=Date.now();
+ try{
  const reqUrl=new URL(req.url,'http://localhost');const origin=req.headers.origin;
+ // Log only slow/aborted API requests, never tokens, IPs, URLs with query or bodies.
+ if(reqUrl.pathname.startsWith('/api/')){
+  res.on('finish',()=>{
+   const ms=Date.now()-startTime;
+   if(ms>=2000||res.statusCode>=500)console.warn('[api-slow]',req.method,reqUrl.pathname,res.statusCode,ms+'ms');
+  });
+  res.on('close',()=>{
+   if(!res.writableFinished)console.warn('[api-aborted]',req.method,reqUrl.pathname,Date.now()-startTime+'ms');
+  });
+ }
  if(origin&&allowedOrigins.has(origin)){res.setHeader('access-control-allow-origin',origin);res.setHeader('vary','Origin');res.setHeader('access-control-allow-headers','Content-Type, Authorization');res.setHeader('access-control-allow-methods','GET, POST, OPTIONS')}
  res.setHeader('x-content-type-options','nosniff');res.setHeader('referrer-policy','strict-origin-when-cross-origin');
- try{
   if(req.method==='OPTIONS'){res.writeHead(origin&&!allowedOrigins.has(origin)?403:204);res.end();return;}
   if(origin&&!allowedOrigins.has(origin)&&reqUrl.pathname.startsWith('/api/'))throw jsonError('Origin не разрешён',403);
   if(reqUrl.pathname==='/config.js'){res.writeHead(200,{'content-type':'text/javascript; charset=utf-8','cache-control':'no-store'});res.end('window.PO_PUTI_BACKEND = true;');return;}
-  if(reqUrl.pathname.startsWith('/api/')){const data=req.method==='POST'?await parseBody(req):{};const output=handleApi(req,reqUrl.pathname,data);send(res,output);return;}
+  if(reqUrl.pathname.startsWith('/api/')){const data=req.method==='POST'?await parseBody(req):{};const output=await handleApi(req,reqUrl.pathname,data);send(res,output);return;}
   if(req.method==='GET'||req.method==='HEAD')return await serveStatic(req,res,reqUrl.pathname);
   throw jsonError('Метод не поддерживается',405);
  }catch(error){if(!res.headersSent){send(res,{error:error.status?error.message:'Внутренняя ошибка сервера'},error.status||500)}else res.end();if(!error.status)console.error(error)}
@@ -199,7 +274,7 @@ const PORT=Number(process.env.PORT||8080),HOST=process.env.HOST||'127.0.0.1';
 if(process.env.ADMIN_USERNAME&&process.env.ADMIN_PASSWORD){
  const uname=process.env.ADMIN_USERNAME.toLowerCase();if(!usernameValid(uname)||!passwordValid(process.env.ADMIN_PASSWORD))throw Error('Invalid ADMIN_USERNAME or ADMIN_PASSWORD (minimum 8 chars)');
  let admin=q('SELECT * FROM users WHERE username=?',uname);
- if(!admin){const salt=crypto.randomBytes(20).toString('hex');run('INSERT INTO users(id,username,salt,hash,name,role,created) VALUES(?,?,?,?,?,?,?)',uid(),uname,salt,saltHash(process.env.ADMIN_PASSWORD,salt),'Администратор','admin',now());console.log('Administrator account created:',uname)}
+ if(!admin){const salt=crypto.randomBytes(20).toString('hex');run('INSERT INTO users(id,username,salt,hash,name,role,created) VALUES(?,?,?,?,?,?,?)',uid(),uname,salt,await saltHash(process.env.ADMIN_PASSWORD,salt),'Администратор','admin',now());console.log('Administrator account created:',uname)}
  else if(admin.role!=='admin')console.error('Admin username already exists without admin role; not escalating');
 }
 server.listen(PORT,HOST,()=>console.log(`По пути API running at http://${HOST}:${PORT}; database at ${DATA}`));

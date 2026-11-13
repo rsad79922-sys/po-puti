@@ -47,6 +47,13 @@ try{
  assert.equal((await call('/profile','POST',{name:'Фотограф',photo:'data:image/svg+xml;base64,PHN2Zy8+'},token)).status,400,'SVG must be rejected');
  assert.equal((await call('/rides','POST',{...rideData,photo:'data:image/jpeg;base64,'+Buffer.alloc(120001,0xff).toString('base64')},token)).status,413,'oversized car photo must be rejected');
  assert.equal((await call('/rides','POST',{...rideData,photo:'data:image/jpeg;base64,'+Buffer.from('not a jpeg').toString('base64')},token)).status,400,'spoofed JPEG must be rejected');
+ // An over-limit payload must receive JSON HTTP 413 rather than abruptly
+ // destroying the socket (which appeared as a generic Safari network error).
+ const oversized=await fetch(base+'/profile',{method:'POST',headers:{
+  'content-type':'application/json',authorization:'Bearer '+token
+ },body:JSON.stringify({name:'Фотограф',photo:'A'.repeat(1_200_000)}),signal:AbortSignal.timeout(10000)});
+ assert.equal(oversized.status,413,'oversized request must return an HTTP response, not reset the socket');
+ assert.match((await oversized.json()).error,/большой/i);
  const rideWithoutPhoto=expectOk(await call('/rides','POST',{...rideData,photo:''},token),'publish without photo');
  state=expectOk(await call('/state','GET',undefined,token),'state after empty');
  assert.equal(state.rides.find(r=>r.id===rideWithoutPhoto.id).photo,'','optional photo must be optional');

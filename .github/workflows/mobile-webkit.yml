@@ -14,6 +14,7 @@ on:
     paths:
       - 'www/**'
       - 'server/**'
+      - 'deploy/**'
       - 'tests/**'
       - '.github/workflows/mobile-webkit.yml'
   workflow_dispatch:
@@ -49,10 +50,22 @@ jobs:
         run: node tests/server-routing.mjs
       - name: Test isolated multi-user booking and security
         run: node tests/server-full-flow.mjs
+      - name: Test isolated WAL backup and restore safeguards
+        run: node tests/sqlite-backup.mjs
       - name: Test profile and car photos in isolated SQLite
         run: node tests/photo-upload.mjs
       - name: Check no overlapping Safari API state refresh
         run: node tests/refresh-singleflight.mjs
+      - name: Audit API safety, dates and real Android-origin CORS
+        run: node tests/audit-api-android.mjs
+      - name: Audit Safari sessions and refresh after committed writes
+        run: node tests/audit-refresh-after-write.mjs
+      - name: Test Safari post-mutation state freshness and latency races
+        run: node tests/state-refresh-after-mutation.mjs
+      - name: Validate reversible network diagnostics and release shell syntax
+        run: |
+          bash -n deploy/temporary-https-mss-test.sh
+          bash -n deploy/release-on-vps.sh
       - name: Check anonymous and returning-session startup
         run: node tests/mobile-startup.mjs
       - name: Run real WebKit iPhone-sized browser smoke
