@@ -35,7 +35,7 @@ jobs:
                 fi
                 output="health-$attempt-$version-$route.json"
                 echo "CHECK attempt=$attempt tls=$version route=$route" | tee -a https-diagnostic.log
-                if curl -4 --noproxy '*' --fail --silent --show-error --connect-timeout 5 --max-time 14 --tlsv1."$version" --tls-max "$version"                     "${resolver[@]}" -H 'Accept: application/json' -H 'Cache-Control: no-cache'                     -o "$output" -w 'HTTP=%{http_code} TCP=%{time_connect}s TLS=%{time_appconnect}s TOTAL=%{time_total}s CERT=%{ssl_verify_result}\n'                     https://vputipoputka.ru/api/health 2>&1 | tee -a https-diagnostic.log                     && grep -Eq '"ok"[[:space:]]*:[[:space:]]*true' "$output"; then
+                if curl -4 --noproxy '*' --fail --silent --show-error --connect-timeout 5 --max-time 14 --tlsv"$version" --tls-max "$version"                     "${resolver[@]}" -H 'Accept: application/json' -H 'Cache-Control: no-cache'                     -o "$output" -w 'HTTP=%{http_code} TCP=%{time_connect}s TLS=%{time_appconnect}s TOTAL=%{time_total}s CERT=%{ssl_verify_result}\n'                     https://vputipoputka.ru/api/health 2>&1 | tee -a https-diagnostic.log                     && grep -Eq '"ok"[[:space:]]*:[[:space:]]*true' "$output"; then
                   echo "PASS attempt=$attempt tls=$version route=$route" | tee -a https-diagnostic.log
                 else
                   failures=$((failures + 1))
