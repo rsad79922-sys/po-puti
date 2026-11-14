@@ -258,7 +258,14 @@ async function serveStatic(req,res,pathname){
  let path=pathname==='/'?'/index.html':pathname;
  try{path=decodeURIComponent(path)}catch{throw jsonError('Неверный путь',400)}
  if(appScreen.test(path) && String(req.headers.accept||'').includes('text/html')) path='/index.html';
- if(path.startsWith('/uploads/')){\n   const name=path.slice('/uploads/'.length);\n   if(!/^[a-f0-9]{32}\\.(?:jpg|png|webp)$/.test(name))throw jsonError('Файл не найден',404);\n   const file=join(UPLOADS,name);if(!existsSync(file))throw jsonError('Файл не найден',404);\n   const body=await readFile(file),type=name.endsWith('.jpg')?'image/jpeg':name.endsWith('.png')?'image/png':'image/webp';\n   res.writeHead(200,{'content-type':type,'cache-control':'public, max-age=31536000, immutable','x-content-type-options':'nosniff','content-length':body.length});res.end(req.method==='HEAD'?undefined:body);return;\n }\n const file=resolve(WEB,'.'+path);
+ if(path.startsWith('/uploads/')){
+   const name=path.slice('/uploads/'.length);
+   if(!/^[a-f0-9]{32}\.(?:jpg|png|webp)$/.test(name))throw jsonError('Файл не найден',404);
+   const file=join(UPLOADS,name);if(!existsSync(file))throw jsonError('Файл не найден',404);
+   const body=await readFile(file),type=name.endsWith('.jpg')?'image/jpeg':name.endsWith('.png')?'image/png':'image/webp';
+   res.writeHead(200,{'content-type':type,'cache-control':'public, max-age=31536000, immutable','x-content-type-options':'nosniff','content-length':body.length});res.end(req.method==='HEAD'?undefined:body);return;
+ }
+ const file=resolve(WEB,'.'+path);
  if(!file.startsWith(WEB+sep))throw jsonError('Доступ запрещён',403);
  if(!existsSync(file)){
    // Path only: do not log query strings, passwords or auth headers.
