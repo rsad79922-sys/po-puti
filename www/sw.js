@@ -1,7 +1,7 @@
 /* Network-first shell. Bump CACHE_NAME whenever the shell release changes.
    API traffic is never intercepted; the new worker activates immediately. */
 const CACHE_PREFIX = 'po-puti-shell-';
-const CACHE_NAME = CACHE_PREFIX + 'network-first-v2';
+const CACHE_NAME = CACHE_PREFIX + 'network-first-v4';
 const NETWORK_TIMEOUT_MS = 15000;
 const SHELL = new Map([
   ['/index.html', ['text/html']],
@@ -78,11 +78,17 @@ async function networkFirst(event, path, navigation) {
   try {
     const response = await fetchComplete(event.request, path);
     if (path) {
-      // A cache/quota failure must not turn a successful network load into an error.
-      const copy = response.clone();
-      event.waitUntil(caches.open(CACHE_NAME)
-        .then(cache => cache.put(cacheKey(path), copy))
-        .catch(() => {}));
+      // Complete this cache write inside the promise passed to respondWith.
+      // Calling waitUntil here, after awaiting fetch(), can be rejected by
+      // WebKit because the fetch event's synchronous dispatch has ended. That
+      // rejection would enter this catch and turn a good network response into
+      // a stale-cache fallback (or an offline error).
+      try {
+        const cache = await caches.open(CACHE_NAME);
+        await cache.put(cacheKey(path), response.clone());
+      } catch {
+        // Storage/quota failures must not turn a successful network load into an error.
+      }
     }
     return response;
   } catch {

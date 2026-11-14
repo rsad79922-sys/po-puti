@@ -74,6 +74,11 @@ try{
  assert.equal(impossibleDate.status,400,'invalid calendar date was accepted');
  const impossibleTime=await request('/rides','POST',{...rideBody,time:'29:77'},driver.token);
  assert.equal(impossibleTime.status,400,'invalid departure time was accepted');
+ const photo='data:image/jpeg;base64,'+Buffer.from([255,216,255,224,0,16]).toString('base64');
+ const parallelBody={...rideBody,clientKey:'parallel_'+suffix,photo};
+ const parallel=await Promise.all(Array.from({length:6},()=>request('/rides','POST',parallelBody,driver.token)));
+ assert(parallel.every(r=>r.status===200),'concurrent idempotent uploads returned an error: '+JSON.stringify(parallel));
+ assert.equal(new Set(parallel.map(r=>r.data.id)).size,1,'concurrent retries published multiple rides');
  const ride=await ok('/rides','POST',rideBody,driver.token);
  const duplicate=await ok('/rides','POST',rideBody,driver.token);
  assert.equal(ride.id,duplicate.id,'ride idempotency failed');
@@ -91,6 +96,9 @@ try{
  await ok('/requests/'+requestResult.id+'/accept','POST',{},driver.token);
  passengerView=await ok('/state','GET',undefined,passenger.token);
  assert.equal(passengerView.users.find(u=>u.id===driver.user.id).phone,'+79991110000','confirmed passenger cannot see driver phone');
+ const outsiderView=await ok('/state','GET',undefined,outsider.token);
+ assert.equal(outsiderView.rides.find(r=>r.id===ride.id).occupiedSeats,1,'unrelated passenger must see all reserved seats');
+ assert(!outsiderView.requests.some(r=>r.rideId===ride.id),'reservation counts must not expose passenger identities');
  await ok('/messages','POST',{rideId:ride.id,toId:driver.user.id,text:'Здравствуйте'},passenger.token);
  const newDriverView=await ok('/state','GET',undefined,driver.token);
  assert(newDriverView.messages.some(m=>m.text==='Здравствуйте'),'driver did not receive message');
