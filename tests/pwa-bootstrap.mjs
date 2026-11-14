@@ -9,6 +9,7 @@ const app=readFileSync(new URL('app.js',root),'utf8');
 
 assert.match(sw,/addEventListener\s*\(\s*['"]fetch['"]/, 'Network First handler required');
 assert.match(sw,/NETWORK_TIMEOUT_MS = 15000/);
+assert.match(sw,/CACHE_NAME = CACHE_PREFIX \+ 'network-first-v2'/,'shell release must use a fresh cache version');
 assert.match(sw,/caches\.delete/, 'old poisoned PWA caches must be cleared');
 assert.match(sw,/skipWaiting/);
 assert.match(sw,/clients\.claim/);
