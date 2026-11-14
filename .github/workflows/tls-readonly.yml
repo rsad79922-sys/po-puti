@@ -10,7 +10,11 @@ concurrency:
   cancel-in-progress: false
 jobs:
   diagnose:
-    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-22.04, ubuntu-24.04, ubuntu-latest]
+    runs-on: ${{ matrix.runner }}
     environment: production
     timeout-minutes: 8
     steps:
@@ -51,11 +55,11 @@ jobs:
           cap_pid=''
           cleanup(){ if [ -n "$cap_pid" ]; then kill "$cap_pid" 2>/dev/null || true; fi; rm -f "$capture"; }
           trap cleanup EXIT
-          timeout 85 tcpdump -nn -tttt -l -i eth0 -s 96 "tcp port 443 and host $probe_ip" > "$capture" 2>&1 &
+          timeout 165 tcpdump -nn -tttt -l -i eth0 -s 96 "tcp port 443 and host $probe_ip" > "$capture" 2>&1 &
           cap_pid=$!
           echo CAPTURE_READY
           wait "$cap_pid" || true
-          sed -E 's/([0-9]{1,3}\.){3}[0-9]{1,3}/[ipv4]/g' "$capture" | tail -n 320
+          sed -E 's/([0-9]{1,3}\.){3}[0-9]{1,3}/[ipv4]/g' "$capture" | tail -n 1000
           tail -n 35 /var/log/nginx/po-puti-tls.log | sed -E 's/([0-9]{1,3}\.){3}[0-9]{1,3}/[ipv4]/g'
           awk '/probe=gh-tls-readonly/{print}' /var/log/nginx/access.log | tail -n 30 | sed -E 's/([0-9]{1,3}\.){3}[0-9]{1,3}/[ipv4]/g'
           REMOTE
@@ -67,11 +71,12 @@ jobs:
             sleep 1
           done
           grep -q CAPTURE_READY "$RUNNER_TEMP/remote.txt"
-          for round in 1 2 3; do
+          for round in 1 2 3 4 5 6; do
             for tls in 1.2 1.3; do
               date -u
               curl --noproxy '*' --http1.1 --tlsv"$tls" --tls-max "$tls" --resolve vputipoputka.ru:443:130.49.129.99 --connect-timeout 6 --max-time 10 -sS -o /dev/null -w "PROBE round=$round tls=$tls http=%{http_code} verify=%{ssl_verify_result} connect=%{time_connect} handshake=%{time_appconnect} total=%{time_total}\n" "https://vputipoputka.ru/api/health?probe=gh-tls-readonly-$round-$tls" || true
             done
+            if [ "$round" -lt 6 ]; then sleep 3; fi
           done
           wait "$remote_pid"
           cat "$RUNNER_TEMP/remote.txt"
