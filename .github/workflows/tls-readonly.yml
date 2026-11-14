@@ -78,5 +78,77 @@ jobs:
             done
             if [ "$round" -lt 6 ]; then sleep 3; fi
           done
+          cat > "$RUNNER_TEMP/padded.py" <<'PADDED'
+          """Read-only first-flight TLS probe; sends no HTTP or account credentials."""
+          import socket
+          import ssl
+          import struct
+          import time
+          
+          HOST = 'vputipoputka.ru'
+          IP = '130.49.129.99'
+          
+          
+          def client_hello(size, version):
+              ctx = ssl.create_default_context()
+              ctx.set_ecdh_curve('X25519')
+              ctx.minimum_version = version
+              ctx.maximum_version = version
+              incoming, outgoing = ssl.MemoryBIO(), ssl.MemoryBIO()
+              conn = ctx.wrap_bio(incoming, outgoing, server_side=False, server_hostname=HOST)
+              try:
+                  conn.do_handshake()
+              except ssl.SSLWantReadError:
+                  pass
+              record = outgoing.read()
+              assert record[0] == 22 and record[5] == 1
+              assert len(record) == 5 + int.from_bytes(record[3:5], 'big')
+              body = record[9:]
+              pos = 34
+              pos += 1 + body[pos]  # session ID
+              pos += 2 + int.from_bytes(body[pos:pos+2], 'big')  # cipher suites
+              pos += 1 + body[pos]  # compression
+              extpos = pos
+              end = pos + 2 + int.from_bytes(body[pos:pos+2], 'big')
+              assert end == len(body)
+              pos += 2
+              extensions = []
+              while pos < end:
+                  kind, length = struct.unpack('!HH', body[pos:pos+4])
+                  if kind != 21:  # replace padding instead of duplicating it
+                      extensions.append(body[pos:pos+4+length])
+                  pos += 4 + length
+              assert pos == end
+              extensions = b''.join(extensions)
+              padding = size - (5 + 4 + extpos + 2 + len(extensions) + 4)
+              assert 0 <= padding <= 16384
+              extensions += struct.pack('!HH', 21, padding) + bytes(padding)
+              body = body[:extpos] + struct.pack('!H', len(extensions)) + extensions
+              handshake = b'\x01' + len(body).to_bytes(3, 'big') + body
+              result = record[:3] + struct.pack('!H', len(handshake)) + handshake
+              assert len(result) == size
+              return result
+          
+          
+          def main():
+              for version in (ssl.TLSVersion.TLSv1_2, ssl.TLSVersion.TLSv1_3):
+                  for size in (512, 1200, 1535, 3000):
+                      started = time.monotonic()
+                      try:
+                          payload = client_hello(size, version)
+                          with socket.create_connection((IP, 443), timeout=5) as sock:
+                              sock.settimeout(5)
+                              sock.sendall(payload)
+                              header = sock.recv(5)
+                              record_type = header[0] if header else 'EOF'
+                              print(f'PADDED version={version.name} bytes={size} response_type={record_type} elapsed={time.monotonic()-started:.3f}', flush=True)
+                      except Exception as exc:
+                          print(f'PADDED version={version.name} bytes={size} error={type(exc).__name__} elapsed={time.monotonic()-started:.3f}', flush=True)
+          
+          
+          if __name__ == '__main__':
+              main()
+          PADDED
+          python3 "$RUNNER_TEMP/padded.py"
           wait "$remote_pid"
           cat "$RUNNER_TEMP/remote.txt"
