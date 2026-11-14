@@ -23,7 +23,7 @@ const context={
    const nameAtRequest=serverName;
    const tokenAtRequest=String(opts.headers.Authorization||'');
    return new Promise(resolve=>pending.push(()=>resolve({ok:true,status:200,json:async()=>({
-    currentUserId:'me',users:[{id:'me',name:nameAtRequest,username:'test',role:'user',photo:''}],
+    currentUserId:'me',users:[{id:'me',name:nameAtRequest,phone:'',username:'test',role:'user',photo:''}],
     rides:[],requests:[],notifications:[],reviews:[],messages:[],reports:[],tokenAtRequest
    })})));
   }
