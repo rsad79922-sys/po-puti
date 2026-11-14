@@ -8,6 +8,9 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <title>По пути — едем вместе</title>
+  <link rel="stylesheet" href="/styles.css?v=boot13">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/icons/icon.svg" type="image/svg+xml">
   <style>
     html,body{margin:0;min-height:100%;background:#f5f7fb;color:#141b3b;font:16px/1.5 -apple-system,system-ui,Arial,sans-serif}
     #app{min-height:0}
@@ -57,16 +60,7 @@
       }
       done=true;
       boot.remove();
-      var style=document.createElement('link');
-      style.rel='stylesheet';
-      style.href='/styles.css?v=boot12';
-      document.head.appendChild(style);
-      var icon=document.createElement('link');
-      icon.rel='icon';icon.href='/icons/icon.svg';icon.type='image/svg+xml';
-      document.head.appendChild(icon);
-      var manifest=document.createElement('link');
-      manifest.rel='manifest';manifest.href='/manifest.webmanifest';
-      document.head.appendChild(manifest);
+
     }
     function loadApp(){
       status('Запускаем приложение…');
@@ -97,7 +91,7 @@
     }
     /* Do not block navigation on CSS, manifest or a service worker. */
     setTimeout(start,60);
-    setTimeout(function(){if(!done)fail('Загрузка длится слишком долго. Нажмите «Повторить загрузку».');},10000);
+    setTimeout(function(){if(!done)fail('Загрузка длится слишком долго. Нажмите «Повторить загрузку».');},20000);
     if('serviceWorker' in navigator && !window.Capacitor && location.protocol==='https:'){
       navigator.serviceWorker.register('/sw.js',{updateViaCache:'none'})
         .then(function(reg){return reg.update()}).catch(function(){});
