@@ -130,7 +130,7 @@ sudo systemctl list-timers 'po-puti-*'
 Workflow `publish-manual.yml` использует тот же полный Verify для **того же SHA**, затем job release с `needs: verify`. Он допускает публикацию только main:
 
 - вручную через Run workflow с `publish-vputipoputka.ru`;
-- автоматически после push main, если repository variable **`POPUTI_AUTO_DEPLOY`** равна строке `true`. До настройки публикация выключена.
+- автоматически после push main, если repository variable **`POPUTI_AUTO_DEPLOY`** не равна строке `false`. После первой успешной установки автоматическая публикация включена по умолчанию; `false` служит явным выключателем.
 
 Создайте GitHub Environment `production`, при необходимости с required reviewers и allowed branch main. В его secrets задайте:
 
@@ -146,7 +146,7 @@ Workflow `publish-manual.yml` использует тот же полный Veri
 
 На сервере нужен чистый Git checkout main в `/opt/po-puti`, работающий unit новой версии и данные снаружи checkout. Скрипт проверяет SHA принадлежность main и fast-forward, блокирует одновременный релиз, проверяет кандидата в /tmp **до остановки сервиса**, создаёт SQLite/uploads backup, обновляет код и ждёт локальный health с точным SHA и HTTPS health. Ошибка возвращает прежний код; пользовательские данные не откатываются. Внешний runner проверяет HTTPS и SHA ещё раз. Если сбой виден только снаружи, job падает для расследования; автоматический откат по внешнему наблюдению не выполняется.
 
-Этот PR не включает POPUTI_AUTO_DEPLOY, не меняет secrets, не запускает workflow публикации и не сливается автоматически.
+Автоматическое обновление main разрешено владельцем после первой успешной публикации. Secrets хранятся только в GitHub Environment; переключатель `POPUTI_AUTO_DEPLOY=false` отключает автоматические обновления. Публикация всегда требует полного Verify того же SHA.
 
 ## 7. Обновление уже работающего сервера
 

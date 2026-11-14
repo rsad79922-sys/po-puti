@@ -1,7 +1,7 @@
 // Exercise the real release control flow with fake systemctl/curl and a temporary
 // repository/database. No live filesystem paths, network or services are used.
 import assert from 'node:assert/strict';
-import {mkdtemp,mkdir,readFile,writeFile,rm,readdir} from 'node:fs/promises';
+import {mkdtemp,mkdir,readFile,writeFile,rm,readdir,stat} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {spawnSync} from 'node:child_process';
@@ -57,5 +57,6 @@ try{
  result=spawnSync('bash',[scriptPath,candidate],{env:{...env,DEPLOY_TEST_MODE:'success'},encoding:'utf8'});
  assert.equal(result.status,0,result.stdout+result.stderr);assert.match(result.stdout,/RELEASE_OK/);
  assert.equal(run('git',['rev-parse','HEAD'],app),candidate);
+ assert((await stat(join(app,'www/index.html'))).mode&0o004,'updated runtime source must remain readable by the service user');
  console.log('PASS: deployment refuses failed preflight; failed HTTPS rolls back code; success installs exact SHA; database and photos preserved');
 }finally{await rm(root,{recursive:true,force:true})}

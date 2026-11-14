@@ -96,7 +96,7 @@ rollback(){
     # Keep live data and uploaded files. Replacing only the main SQLite file
     # while WAL/SHM exist can corrupt it and erase successful user writes.
     # A data restore is a separate, offline operator procedure.
-    git -C "$APP" reset --hard "$PREVIOUS_SHA" || true
+    (umask 022; git -C "$APP" reset --hard "$PREVIOUS_SHA") || true
     printf "RELEASE_SHA=%s\n" "$PREVIOUS_SHA" > /var/lib/po-puti-release.env
     systemctl start po-puti || true
     systemctl is-active --quiet po-puti || echo 'WARNING: service needs manual attention' >&2
@@ -106,7 +106,9 @@ rollback(){
 trap rollback ERR
 DEPLOY_STARTED=1
 systemctl stop po-puti
-git -C "$APP" merge --ff-only "$TARGET_SHA"
+# Runtime source is public. Keep fresh tracked files readable by poputi while
+# preserving the private umask for backups, env and data outside this subshell.
+(umask 022; git -C "$APP" merge --ff-only "$TARGET_SHA")
 node --check "$APP/server/server.mjs"
 printf "RELEASE_SHA=%s\n" "$TARGET_SHA" > /var/lib/po-puti-release.env
 systemctl start po-puti
