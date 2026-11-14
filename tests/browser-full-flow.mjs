@@ -25,7 +25,7 @@ try{
  }
  assert(ready,'test server failed');
  const engine=process.env.BROWSER_ENGINE||'chromium';
- browser=await (engine==='webkit'?webkit:chromium).launch({headless:true,...(engine==='chromium'?{executablePath:process.env.CHROMIUM_PATH||'/usr/bin/chromium',args:['--no-sandbox']}: {})});
+ browser=await (engine==='webkit'?webkit:chromium).launch({headless:true,...(engine==='chromium'?{...(process.env.CHROMIUM_PATH?{executablePath:process.env.CHROMIUM_PATH}:{}),args:['--no-sandbox']}: {})});
  async function account(username){
   const context=await browser.newContext({viewport:{width:390,height:844}});
   await context.route('https://yandex.ru/**',route=>route.abort());

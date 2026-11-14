@@ -1,14 +1,13 @@
 /* Network-first shell. Bump CACHE_NAME whenever the shell release changes.
    API traffic is never intercepted; the new worker activates immediately. */
 const CACHE_PREFIX = 'po-puti-shell-';
-const CACHE_NAME = CACHE_PREFIX + 'network-first-v4';
+const CACHE_NAME = CACHE_PREFIX + 'network-first-v5';
 const NETWORK_TIMEOUT_MS = 15000;
 const SHELL = new Map([
   ['/index.html', ['text/html']],
   ['/offline.html', ['text/html']],
   ['/styles.css', ['text/css']],
   ['/app.js', ['text/javascript', 'application/javascript']],
-  ['/config.js', ['text/javascript', 'application/javascript']],
   ['/manifest.webmanifest', ['application/manifest+json', 'application/json']],
   ['/icons/icon-192.png', ['image/png']],
   ['/icons/icon-512.png', ['image/png']],
@@ -116,6 +115,7 @@ self.addEventListener('fetch', event => {
   const request = event.request;
   const url = new URL(request.url);
   if (request.method !== 'GET' || url.origin !== self.location.origin ||
+      url.pathname === '/config.js' ||
       url.pathname === '/api' || url.pathname.startsWith('/api/')) return;
 
   const navigation = request.mode === 'navigate';

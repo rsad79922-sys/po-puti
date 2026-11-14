@@ -38,7 +38,8 @@ async function resetPwa(){
    var registrations= ('serviceWorker' in navigator) ? await navigator.serviceWorker.getRegistrations() : [];
    var removed=0;
    for(var i=0;i<registrations.length;i++){
-     if(registrations[i].scope.indexOf(location.origin)===0){
+     var worker=registrations[i].active||registrations[i].waiting||registrations[i].installing;
+     if(worker&&worker.scriptURL===location.origin+'/sw.js'){
        await registrations[i].unregister();removed++;
      }
    }

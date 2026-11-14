@@ -16,9 +16,9 @@ const mime={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=u
 const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/Scj3JwAAAABJRU5ErkJggg==','base64');
 let browser;
 try{
- browser=await (process.env.BROWSER_ENGINE==='chromium'?chromium:webkit).launch({headless:true,...(process.env.BROWSER_ENGINE==='chromium'?{executablePath:process.env.CHROMIUM_PATH||'/usr/bin/chromium',args:['--no-sandbox']}: {})});
+ browser=await (process.env.BROWSER_ENGINE==='chromium'?chromium:webkit).launch({headless:true,...(process.env.BROWSER_ENGINE==='chromium'?{...(process.env.CHROMIUM_PATH?{executablePath:process.env.CHROMIUM_PATH}:{}),args:['--no-sandbox']}: {})});
  const context=await browser.newContext({...devices['iPhone 13'],serviceWorkers:'block'});
- await context.addInitScript(()=>{localStorage.setItem('po-puti-access-v2','fake-test-token')});
+ await context.addInitScript(()=>{localStorage.setItem('po-puti-cookie-session-v1','cookie:fake-test-token')});
  const me={id:'user_1',username:'driver',name:'Тестовый водитель',phone:'',car:'Lada',photo:'',role:'user'};
  const rides=[];
  let profilePayload=null;

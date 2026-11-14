@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-# Explicit, manual release via GitHub Actions. No unattended deployment.
+# Release a CI-verified main commit; called only after the reusable verification gate.
 # Only code and po-puti systemd service are changed. Nginx/firewall/DNS are untouched.
 set -Eeuo pipefail
+exec 9>/run/lock/po-puti-deploy.lock
+flock -n 9 || { echo "Another deployment is running" >&2; exit 2; }
 umask 077
 export LC_ALL=C
 TARGET_SHA="${1:-}"
@@ -12,7 +14,7 @@ UPLOADS=/var/lib/po-puti/uploads
 
 if [[ ! "$TARGET_SHA" =~ ^[0-9a-f]{40}$ ]]; then echo 'Invalid commit SHA' >&2; exit 2; fi
 if [[ "$(id -u)" -ne 0 ]]; then echo 'Requires privileged deploy account (sudo -n)' >&2; exit 2; fi
-for cmd in git node systemctl curl mktemp install tar; do
+for cmd in git node systemctl curl mktemp install tar flock; do
   command -v "$cmd" >/dev/null || { echo "Missing command: $cmd" >&2; exit 2; }
 done
 test -d "$APP/.git" || { echo 'Missing git checkout' >&2; exit 2; }
@@ -28,12 +30,19 @@ echo "Installed SHA: $PREVIOUS_SHA"
 echo "Candidate SHA: $TARGET_SHA"
 
 # Download candidate and check fast-forward before touching live data or service.
-git -C "$APP" fetch --no-tags origin "$TARGET_SHA"
+git -C "$APP" fetch --no-tags origin main
+git -C "$APP" merge-base --is-ancestor "$TARGET_SHA" origin/main || { echo "Candidate is not on main" >&2; exit 2; }
 git -C "$APP" cat-file -e "$TARGET_SHA^{commit}"
 git -C "$APP" merge-base --is-ancestor "$PREVIOUS_SHA" "$TARGET_SHA" ||
   { echo 'Cannot fast-forward existing production checkout' >&2; exit 2; }
 git -C "$APP" cat-file -e "$TARGET_SHA:server/server.mjs"
 git -C "$APP" cat-file -e "$TARGET_SHA:www/index.html"
+
+# Validate candidate in an isolated directory before stopping the working service.
+CANDIDATE=$(mktemp -d /tmp/po-puti-candidate.XXXXXXXX)
+trap 'rm -rf "$CANDIDATE"' EXIT
+git -C "$APP" archive "$TARGET_SHA" | tar -x -C "$CANDIDATE"
+(cd "$CANDIDATE" && node scripts/check.mjs && node scripts/test.mjs && node scripts/build.mjs)
 
 # Consistent online SQLite backup in WAL mode. Create destination exclusively.
 install -d -m 0700 "$BACKUP_ROOT"
@@ -88,6 +97,7 @@ rollback(){
     # while WAL/SHM exist can corrupt it and erase successful user writes.
     # A data restore is a separate, offline operator procedure.
     git -C "$APP" reset --hard "$PREVIOUS_SHA" || true
+    printf "RELEASE_SHA=%s\n" "$PREVIOUS_SHA" > /var/lib/po-puti-release.env
     systemctl start po-puti || true
     systemctl is-active --quiet po-puti || echo 'WARNING: service needs manual attention' >&2
   fi
@@ -98,12 +108,13 @@ DEPLOY_STARTED=1
 systemctl stop po-puti
 git -C "$APP" merge --ff-only "$TARGET_SHA"
 node --check "$APP/server/server.mjs"
+printf "RELEASE_SHA=%s\n" "$TARGET_SHA" > /var/lib/po-puti-release.env
 systemctl start po-puti
 
 healthy=0
-for attempt in 1 2 3 4 5 6 7 8 9 10; do
+for ((attempt=1; attempt<=10; attempt++)); do
   if curl --noproxy '*' -fsS --connect-timeout 2 --max-time 4 \
-    http://127.0.0.1:8080/api/health | grep -q '"ok":true'; then
+    http://127.0.0.1:8080/api/health | node --input-type=module -e 'let s="";for await(const c of process.stdin)s+=c;const h=JSON.parse(s);if(!h.ok||h.release!==process.argv[1])process.exit(1)' "$TARGET_SHA"; then
     healthy=1; break
   fi
   sleep 2

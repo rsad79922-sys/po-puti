@@ -1,6 +1,8 @@
-name: Publish Po Puti (manual, verified backup, rollback)
+name: Deploy Po Puti (verified commit, backup, rollback)
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
     inputs:
       confirmation:
@@ -16,20 +18,19 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  verify:
+    uses: ./.github/workflows/verify.yml
   release:
-    if: github.ref == 'refs/heads/main' && inputs.confirmation == 'publish-vputipoputka.ru'
+    needs: verify
+    if: github.ref == 'refs/heads/main' && ((github.event_name == 'push' && vars.POPUTI_AUTO_DEPLOY == 'true') || (github.event_name == 'workflow_dispatch' && inputs.confirmation == 'publish-vputipoputka.ru'))
     runs-on: ubuntu-24.04
     environment: production
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '24'
-      - name: Validate release script and isolated SQLite restore test
-        run: |
-          bash -n deploy/release-on-vps.sh
-          node tests/sqlite-backup.mjs
       - name: Refuse deployment when required SSH credentials are unavailable
         shell: bash
         env:
@@ -57,6 +58,7 @@ jobs:
           test -n "$DEPLOY_HOST" && test -n "$DEPLOY_USER" && test -n "$DEPLOY_KEY" && test -n "$DEPLOY_KNOWN_HOSTS"
           printf '%s\n' "$DEPLOY_KEY" > "$RUNNER_TEMP/po-puti-ssh.key"
           chmod 0600 "$RUNNER_TEMP/po-puti-ssh.key"
+          trap 'rm -f "$RUNNER_TEMP/po-puti-ssh.key" "$RUNNER_TEMP/po-puti-known-hosts"' EXIT
           printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$RUNNER_TEMP/po-puti-known-hosts"
           chmod 0600 "$RUNNER_TEMP/po-puti-known-hosts"
           if [ -z "$DEPLOY_PORT" ]; then DEPLOY_PORT=22; fi
@@ -73,4 +75,7 @@ jobs:
             curl --noproxy '*' --fail --silent --show-error --connect-timeout 5 --max-time 12 \
               -o /dev/null "https://vputipoputka.ru$resource"
           done
-          echo 'Public site and API respond from independent GitHub runner.'
+          curl --noproxy '*' --fail --silent --show-error --connect-timeout 5 --max-time 12 \
+            https://vputipoputka.ru/api/health > "$RUNNER_TEMP/health.json"
+          node --input-type=module -e 'import fs from "node:fs";const h=JSON.parse(fs.readFileSync(process.argv[1]));if(!h.ok||h.release!==process.env.GITHUB_SHA)process.exit(1)' "$RUNNER_TEMP/health.json"
+          echo 'Public site and exact verified release respond from external GitHub runner.'

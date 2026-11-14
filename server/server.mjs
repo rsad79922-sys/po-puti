@@ -12,6 +12,7 @@ import { fileURLToPath } from 'node:url';
 import crypto from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 
+process.umask(0o077);
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const WEB = resolve(ROOT, 'www');
 const DATA = resolve(process.env.DATA_DIR || join(ROOT, 'server-data'));
@@ -30,6 +31,11 @@ CREATE TABLE IF NOT EXISTS messages(id TEXT PRIMARY KEY, ride_id TEXT NOT NULL R
 CREATE TABLE IF NOT EXISTS notifications(id TEXT PRIMARY KEY, recipient_id TEXT NOT NULL REFERENCES users(id), title TEXT NOT NULL, message TEXT NOT NULL, ride_id TEXT, read INTEGER NOT NULL DEFAULT 0, created INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS reviews(id TEXT PRIMARY KEY, ride_id TEXT NOT NULL REFERENCES rides(id), driver_id TEXT NOT NULL REFERENCES users(id), author_id TEXT NOT NULL REFERENCES users(id), score INTEGER NOT NULL CHECK(score BETWEEN 1 AND 5), text TEXT NOT NULL, created INTEGER NOT NULL, UNIQUE(ride_id,author_id));
 CREATE TABLE IF NOT EXISTS reports(id TEXT PRIMARY KEY, ride_id TEXT NOT NULL REFERENCES rides(id), author_id TEXT NOT NULL REFERENCES users(id), reason TEXT NOT NULL, details TEXT NOT NULL DEFAULT '', created INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS ix_sessions_expires ON sessions(expires);
+CREATE INDEX IF NOT EXISTS ix_requests_user ON requests(user_id);
+CREATE INDEX IF NOT EXISTS ix_messages_from ON messages(from_id);
+CREATE INDEX IF NOT EXISTS ix_messages_to ON messages(to_id);
+CREATE INDEX IF NOT EXISTS ix_reviews_driver ON reviews(driver_id);
 CREATE INDEX IF NOT EXISTS ix_rides_date ON rides(date);
 CREATE INDEX IF NOT EXISTS ix_requests_ride ON requests(ride_id);
 CREATE INDEX IF NOT EXISTS ix_notes_user ON notifications(recipient_id);
@@ -52,9 +58,26 @@ const saltHash = (password,salt) => new Promise((resolve,reject)=>{
  });
 });
 const jsonError=(message,status=400)=>Object.assign(new Error(message),{status});
+const PUBLIC_ORIGIN = process.env.PUBLIC_ORIGIN || '';
+if(PUBLIC_ORIGIN && (new URL(PUBLIC_ORIGIN).origin!==PUBLIC_ORIGIN || !PUBLIC_ORIGIN.startsWith('https://')))throw Error('PUBLIC_ORIGIN must be an HTTPS origin');
+const COOKIE_NAME='poputi_session';
+const SESSION_MS=30*24*3600000;
 const allowedOrigins = new Set((process.env.APP_ORIGINS||'https://localhost,capacitor://localhost,http://localhost:8080').split(',').map(v=>v.trim()).filter(Boolean));
 const limit = new Map();
+if(PUBLIC_ORIGIN)allowedOrigins.add(PUBLIC_ORIGIN);
 let lastRateSweep=0;
+let activeHashes=0;
+async function boundedHash(password,salt){
+ if(activeHashes>=4)throw jsonError('Сервер занят. Повторите позже.',503);
+ activeHashes++;try{return await saltHash(password,salt)}finally{activeHashes--}
+}
+function requestToken(req){
+ const bearer=(req.headers.authorization||'').match(/^Bearer (\S+)$/)?.[1];
+ if(bearer)return bearer;
+ return (req.headers.cookie||'').split(';').map(v=>v.trim()).find(v=>v.startsWith(COOKIE_NAME+'='))?.slice(COOKIE_NAME.length+1)||'';
+}
+function sessionCookie(token){return COOKIE_NAME+'='+token+'; Path=/api; HttpOnly; SameSite=Strict; Max-Age='+(token?SESSION_MS/1000:0)+(PUBLIC_ORIGIN?'; Secure':'')}
+
 function clientIp(req){
  const peer = req.socket.remoteAddress || '';
  const forwarded = String(req.headers['x-real-ip'] || '');
@@ -74,10 +97,10 @@ function checkRate(ip){
 }
 function notify(recipient,title,message,rideId=''){run('INSERT INTO notifications VALUES(?,?,?,?,?,?,?)',uid(),recipient,title,message,rideId,0,now());}
 function transaction(fn){database.exec('BEGIN IMMEDIATE');try{const val=fn();database.exec('COMMIT');return val}catch(err){database.exec('ROLLBACK');throw err}}
-function getActor(req){const token=(req.headers.authorization||'').match(/^Bearer (\S+)$/)?.[1];if(!token)return null;return q('SELECT u.* FROM users u INNER JOIN sessions s ON s.user_id=u.id WHERE s.token_hash=? AND s.expires>?',sha(token),now())||null;}
+function getActor(req){const token=requestToken(req);if(!token)return null;return q('SELECT u.* FROM users u INNER JOIN sessions s ON s.user_id=u.id WHERE s.token_hash=? AND s.expires>?',sha(token),now())||null;}
 function requireActor(req){const actor=getActor(req);if(!actor)throw jsonError('Необходим вход в аккаунт',401);return actor;}
 function requireAdmin(actor){if(actor.role!=='admin')throw jsonError('Нет прав администратора',403)}
-function loggedIn(actor){const token=crypto.randomBytes(32).toString('base64url');run('INSERT INTO sessions VALUES(?,?,?)',sha(token),actor.id,now()+30*24*3600000);return {token,user:{id:actor.id,username:actor.username,role:actor.role}}}
+function loggedIn(actor,req,res){const token=crypto.randomBytes(32).toString('base64url');run('INSERT INTO sessions VALUES(?,?,?)',sha(token),actor.id,now()+SESSION_MS);const cookie=req.headers['x-po-puti-session']==='cookie';if(cookie)res.setHeader('set-cookie',sessionCookie(token));return {...(cookie?{}:{token}),user:{id:actor.id,username:actor.username,role:actor.role}}}
 function rideById(id){const ride=q('SELECT * FROM rides WHERE id=?',id);if(!ride)throw jsonError('Поездка не найдена',404);return ride}
 function confirmed(rideId,id1,id2){const ride=q('SELECT driver_id FROM rides WHERE id=?',rideId);return Boolean(ride&&((ride.driver_id===id1 && q("SELECT id FROM requests WHERE ride_id=? AND user_id=? AND status='accepted'",rideId,id2))||(ride.driver_id===id2&&q("SELECT id FROM requests WHERE ride_id=? AND user_id=? AND status='accepted'",rideId,id1))));}
 const publicPhoto=value=>typeof value==='string'&&/^\/uploads\/[a-f0-9]{32}\.(?:jpg|png|webp)$/.test(value)?value:'';
@@ -184,23 +207,24 @@ function state(actor){
  return {currentUserId:actor.id,users,rides,requests:reqs.map(r=>({id:r.id,rideId:r.ride_id,userId:r.user_id,status:r.status,created:r.created})),notifications,reviews,messages,reports:[]};
 }
 function cancelRide(ride,actor,asAdmin=false){if(ride.driver_id!==actor.id&&!asAdmin)throw jsonError('Недостаточно прав',403);if(ride.cancelled)throw jsonError('Поездка уже отменена',409);transaction(()=>{run('UPDATE rides SET cancelled=1 WHERE id=?',ride.id);for(const r of rows("SELECT * FROM requests WHERE ride_id=? AND status IN ('pending','accepted')",ride.id)){run("UPDATE requests SET status='cancelled' WHERE id=?",r.id);notify(r.user_id,'Поездка отменена',`${ride.origin} → ${ride.destination}: поездка отменена`,ride.id)}});return {ok:true};}
-async function handleApi(req,path,data){const method=req.method;
- if(path==='/api/health' && method==='GET')return {ok:true,backend:'sqlite',version:'0.2'};
+async function handleApi(req,res,path,data){const method=req.method;
+ if(path==='/api/health' && method==='GET')return {ok:q('SELECT 1 AS ok').ok===1,backend:'sqlite',version:'0.2',release:process.env.RELEASE_SHA||'development'};
  if(path==='/api/register' && method==='POST'){
    checkRate(clientIp(req));const uname=clean(data.username,33).toLowerCase();if(!usernameValid(uname)||!passwordValid(data.password))throw jsonError('Логин должен содержать 3–32 символа, пароль — не менее 8');
    if(q('SELECT id FROM users WHERE username=?',uname))throw jsonError('Этот логин уже занят',409);
-   const id=uid(),salt=crypto.randomBytes(20).toString('hex');try{run('INSERT INTO users(id,username,salt,hash,name,role,created) VALUES(?,?,?,?,?,?,?)',id,uname,salt,await saltHash(data.password,salt),uname,'user',now())}catch{throw jsonError('Не удалось создать аккаунт',409)}
-   return loggedIn(q('SELECT * FROM users WHERE id=?',id));
+   const id=uid(),salt=crypto.randomBytes(20).toString('hex'),hash=await boundedHash(data.password,salt);try{run('INSERT INTO users(id,username,salt,hash,name,role,created) VALUES(?,?,?,?,?,?,?)',id,uname,salt,hash,uname,'user',now())}catch(error){if(q('SELECT id FROM users WHERE username=?',uname))throw jsonError('Этот логин уже занят',409);throw error}
+   return loggedIn(q('SELECT * FROM users WHERE id=?',id),req,res);
  }
  if(path==='/api/login' && method==='POST'){
-   checkRate(clientIp(req));const uname=clean(data.username,33).toLowerCase();const user=q('SELECT * FROM users WHERE username=?',uname);
-   const salt=user?.salt||'no-user-salt',expected=user?.hash||'0'.repeat(128),actual=await saltHash(String(data.password||''),salt);
+   checkRate(clientIp(req));if(!passwordValid(data.password))throw jsonError('Неверный логин или пароль',401);const uname=clean(data.username,33).toLowerCase();const user=q('SELECT * FROM users WHERE username=?',uname);
+   const salt=user?.salt||'no-user-salt',expected=user?.hash||'0'.repeat(128),actual=await boundedHash(data.password,salt);
    if(!user||!crypto.timingSafeEqual(Buffer.from(expected,'hex'),Buffer.from(actual,'hex')))throw jsonError('Неверный логин или пароль',401);
-   return loggedIn(user);
+   return loggedIn(user,req,res);
  }
  const actor=requireActor(req);
+ if(path==='/api/session'&&method==='POST'){const result=loggedIn(actor,req,res);run('DELETE FROM sessions WHERE token_hash=?',sha(requestToken(req)));return result;}
  if(path==='/api/state'&&method==='GET')return state(actor);
- if(path==='/api/logout'&&method==='POST'){const token=(req.headers.authorization||'').slice(7);run('DELETE FROM sessions WHERE token_hash=?',sha(token));return {ok:true}}
+ if(path==='/api/logout'&&method==='POST'){const token=requestToken(req);res.setHeader('set-cookie',sessionCookie(''));run('DELETE FROM sessions WHERE token_hash=?',sha(token));return {ok:true}}
  if(path==='/api/profile'&&method==='POST'){
    const name=clean(data.name,60),car=clean(data.car,90),phone=clean(data.phone,24);
    if(!name)throw jsonError('Укажите имя');
@@ -277,6 +301,11 @@ async function serveStatic(req,res,pathname){
  }
  const mime={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.json':'application/json','.webmanifest':'application/manifest+json','.svg':'image/svg+xml','.png':'image/png'};
  const body=await readFile(file);
+ if(file===join(WEB,'index.html')){
+  const inline=body.toString('utf8').match(/<script>([\s\S]*?)<\/script>/)?.[1];
+  const hash=crypto.createHash('sha256').update(inline||'').digest('base64');
+  res.setHeader('content-security-policy',"default-src 'self'; script-src 'self' 'sha256-"+hash+"'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; frame-src https://yandex.ru; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'");
+ }
  res.writeHead(200,{'content-type':mime[extname(file)]||'application/octet-stream','x-content-type-options':'nosniff','cache-control':extname(file)==='.html'?'no-store':'no-cache','content-length':body.length});
  res.end(req.method==='HEAD'?undefined:body);
 }
@@ -284,6 +313,7 @@ const server=http.createServer(async(req,res)=>{
  const startTime=Date.now();
  try{
  const reqUrl=new URL(req.url,'http://localhost');const origin=req.headers.origin;
+ const originAllowed=allowedOrigins.has(origin)||origin===(PUBLIC_ORIGIN||'http://'+req.headers.host);
  // Log only slow/aborted API requests, never tokens, IPs, URLs with query or bodies.
  if(reqUrl.pathname.startsWith('/api/')){
   res.on('finish',()=>{
@@ -294,16 +324,40 @@ const server=http.createServer(async(req,res)=>{
    if(!res.writableFinished)console.warn('[api-aborted]',req.method,reqUrl.pathname,Date.now()-startTime+'ms');
   });
  }
- if(origin&&allowedOrigins.has(origin)){res.setHeader('access-control-allow-origin',origin);res.setHeader('vary','Origin');res.setHeader('access-control-allow-headers','Content-Type, Authorization');res.setHeader('access-control-allow-methods','GET, POST, OPTIONS')}
+ if(origin&&originAllowed){res.setHeader('access-control-allow-origin',origin);res.setHeader('vary','Origin');res.setHeader('access-control-allow-headers','Content-Type, Authorization, X-Po-Puti-Session');res.setHeader('access-control-allow-methods','GET, POST, OPTIONS')}
  res.setHeader('x-content-type-options','nosniff');res.setHeader('referrer-policy','strict-origin-when-cross-origin');
-  if(req.method==='OPTIONS'){res.writeHead(origin&&!allowedOrigins.has(origin)?403:204);res.end();return;}
-  if(origin&&!allowedOrigins.has(origin)&&reqUrl.pathname.startsWith('/api/'))throw jsonError('Origin не разрешён',403);
-  if(reqUrl.pathname==='/config.js'){res.writeHead(200,{'content-type':'text/javascript; charset=utf-8','cache-control':'no-store'});res.end('window.PO_PUTI_BACKEND = true;');return;}
-  if(reqUrl.pathname.startsWith('/api/')){const data=req.method==='POST'?await parseBody(req):{};const output=await handleApi(req,reqUrl.pathname,data);send(res,output);return;}
+ res.setHeader('x-frame-options','DENY');
+ res.setHeader('permissions-policy','camera=(), microphone=(), geolocation=()');
+ if(reqUrl.pathname.startsWith('/api/')&&req.method==='POST'){
+  if(!String(req.headers['content-type']||'').toLowerCase().startsWith('application/json'))throw jsonError('Требуется application/json',415);
+  // Cookies require same-origin requests; native/API callers use Bearer auth.
+  if((requestToken(req)&&!req.headers.authorization)||req.headers['x-po-puti-session']==='cookie'){
+   if(req.headers['sec-fetch-site']==='cross-site')throw jsonError('Запрос с другого сайта запрещён',403);
+   const expected=PUBLIC_ORIGIN||'http://'+req.headers.host;
+   if(origin&&origin!==expected)throw jsonError('Origin не разрешён для cookie-сессии',403);
+  }
+ }
+  if(req.method==='OPTIONS'){res.writeHead(origin&&!originAllowed?403:204);res.end();return;}
+  if(origin&&!originAllowed&&reqUrl.pathname.startsWith('/api/'))throw jsonError('Origin не разрешён',403);
+  if(reqUrl.pathname==='/config.js'&&(req.method==='GET'||req.method==='HEAD')){res.writeHead(200,{'content-type':'text/javascript; charset=utf-8','cache-control':'no-store'});res.end(req.method==='HEAD'?undefined:'window.PO_PUTI_BACKEND = true;');return;}
+  if(reqUrl.pathname.startsWith('/api/')){const data=req.method==='POST'?await parseBody(req):{};const output=await handleApi(req,res,reqUrl.pathname,data);send(res,output);return;}
   if(req.method==='GET'||req.method==='HEAD')return await serveStatic(req,res,reqUrl.pathname);
   throw jsonError('Метод не поддерживается',405);
  }catch(error){if(!res.headersSent){send(res,{error:error.status?error.message:'Внутренняя ошибка сервера'},error.status||500)}else res.end();if(!error.status)console.error(error)}
 });
+server.requestTimeout=15000;
+server.headersTimeout=10000;
+server.keepAliveTimeout=5000;
+server.maxRequestsPerSocket=1000;
+let stopping=false;
+for(const signal of ['SIGTERM','SIGINT'])process.on(signal,()=>{
+ if(stopping)return;stopping=true;
+ const deadline=setTimeout(()=>process.exit(1),15000);deadline.unref();
+ server.close(()=>{database.close();clearTimeout(deadline);process.exit(0)});
+ server.closeIdleConnections();
+});
+// Expired credentials are maintenance data, never user records.
+const sessionCleanup=setInterval(()=>run('DELETE FROM sessions WHERE expires<=?',now()),3600000);sessionCleanup.unref();
 const PORT=Number(process.env.PORT||8080),HOST=process.env.HOST||'127.0.0.1';
 if(process.env.ADMIN_USERNAME&&process.env.ADMIN_PASSWORD){
  const uname=process.env.ADMIN_USERNAME.toLowerCase();if(!usernameValid(uname)||!passwordValid(process.env.ADMIN_PASSWORD))throw Error('Invalid ADMIN_USERNAME or ADMIN_PASSWORD (minimum 8 chars)');
@@ -312,4 +366,4 @@ if(process.env.ADMIN_USERNAME&&process.env.ADMIN_PASSWORD){
  else if(admin.role!=='admin')console.error('Admin username already exists without admin role; not escalating');
 }
 await migrateLegacyPhotos();
-server.listen(PORT,HOST,()=>console.log(`По пути API running at http://${HOST}:${PORT}; database at ${DATA}`));
+server.listen(PORT,HOST,()=>console.log(`По пути API running at http://${HOST}:${server.address().port}; database at ${DATA}`));

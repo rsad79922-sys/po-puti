@@ -1,0 +1,11 @@
+[Unit]
+Description=Po Puti private SQLite and uploads backup
+After=po-puti.service
+[Service]
+Type=oneshot
+UMask=0077
+ExecStart=/bin/bash /opt/po-puti/deploy/backup.sh
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/backups/po-puti /run/lock
