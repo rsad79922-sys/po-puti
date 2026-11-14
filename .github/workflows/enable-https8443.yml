@@ -1,0 +1,205 @@
+name: Verified alternate HTTPS entry with automatic rollback
+on:
+  push:
+    branches: ['diagnostics/tls-20261114']
+    paths: ['.github/workflows/enable-https8443.yml']
+permissions:
+  contents: read
+concurrency:
+  group: po-puti-production
+  cancel-in-progress: false
+jobs:
+  enable-alternate-https:
+    runs-on: ubuntu-24.04
+    environment: production
+    timeout-minutes: 8
+    steps:
+      - name: Add alternate TLS listener and origin; verify before disarming rollback
+        shell: bash
+        env:
+          DEPLOY_HOST: ${{ secrets.POPUTI_DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.POPUTI_DEPLOY_USER }}
+          DEPLOY_KEY: ${{ secrets.POPUTI_DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.POPUTI_DEPLOY_KNOWN_HOSTS }}
+          DEPLOY_PORT: ${{ secrets.POPUTI_DEPLOY_PORT }}
+        run: |
+          cat > "$RUNNER_TEMP/enable-8443-remote.sh" <<'REMOTE_SCRIPT'
+          set -Eeuo pipefail
+          umask 077
+          systemctl is-active --quiet nginx
+          systemctl is-active --quiet po-puti
+          if ss -H -ltn '( sport = :8443 )' | grep -q .; then
+            echo 'Refusing: port 8443 is already in use' >&2
+            exit 2
+          fi
+          backup_dir=$(mktemp -d /var/backups/po-puti-https8443-XXXXXXXX)
+          export POPUTI_8443_BACKUP="$backup_dir"
+          # Discover only the active site file and environment-file path. No secret
+          # environment values or private certificate contents are printed.
+          python3 - <<'PY'
+          import os,pathlib,re,subprocess,json
+          root=pathlib.Path(os.environ['POPUTI_8443_BACKUP'])
+          dump=subprocess.run(['nginx','-T'],check=True,capture_output=True,text=True).stdout
+          pieces=re.split(r'^# configuration file ([^\n]+):\n',dump,flags=re.M)
+          candidates=[]
+          for i in range(1,len(pieces),2):
+              body=pieces[i+1]
+              if re.search(r'^\s*server_name\s+[^;]*\bvputipoputka\.ru\b',body,re.M) and re.search(r'^\s*listen\s+443\s+ssl\b',body,re.M):
+                  candidates.append(pathlib.Path(pieces[i]).resolve())
+          if len(set(candidates))!=1:raise RuntimeError('Ambiguous nginx site; no changes made')
+          site=candidates[0]
+          if not str(site).startswith('/etc/nginx/'):raise RuntimeError('Unexpected nginx path')
+          envfiles=subprocess.check_output(['systemctl','show','po-puti','-p','EnvironmentFiles','--value'],text=True)
+          if '/etc/po-puti/po-puti.env ' not in envfiles:raise RuntimeError('Unexpected environment-file configuration')
+          env=pathlib.Path('/etc/po-puti/po-puti.env')
+          for source,name in [(site,'nginx.before'),(env,'env.before')]:
+              content=source.read_bytes()
+              (root/name).write_bytes(content)
+              st=source.stat()
+              (root/(name+'.stat')).write_text(json.dumps({'mode':st.st_mode&0o777,'uid':st.st_uid,'gid':st.st_gid}))
+          (root/'site-path').write_text(str(site))
+          (root/'env-path').write_text(str(env))
+          PY
+          cat > "$backup_dir/restore.py" <<'PY'
+          import pathlib,json,os,tempfile
+          root=pathlib.Path(__file__).parent
+          for name,pathkey in [('nginx.before','site-path'),('env.before','env-path')]:
+              target=pathlib.Path((root/pathkey).read_text())
+              stat=json.loads((root/(name+'.stat')).read_text())
+              fd,temp=tempfile.mkstemp(prefix='.po-puti-restore-',dir=target.parent)
+              try:
+                  with os.fdopen(fd,'wb') as output:output.write((root/name).read_bytes());output.flush();os.fsync(output.fileno())
+                  os.chmod(temp,stat['mode']);os.chown(temp,stat['uid'],stat['gid']);os.replace(temp,target)
+              finally:
+                  if os.path.exists(temp):os.unlink(temp)
+          PY
+          cat > "$backup_dir/rollback.sh" <<'ROLLBACK'
+          #!/bin/bash
+          set -euo pipefail
+          root=$(cd -- "$(dirname -- "$0")" && pwd)
+          python3 "$root/restore.py"
+          nginx -t
+          systemctl reload nginx
+          systemctl restart po-puti
+          echo 'HTTPS8443_ROLLED_BACK: previous configuration restored; database untouched'
+          ROLLBACK
+          chmod 0700 "$backup_dir/rollback.sh"
+          unit="po-puti-8443-rollback-$(date +%s)-$RANDOM"
+          systemd-run --unit="$unit" --on-active=240s /bin/bash "$backup_dir/rollback.sh"
+          systemctl is-active --quiet "$unit.timer"
+          rollback(){ trap - ERR HUP INT TERM; bash "$backup_dir/rollback.sh"; exit 1; }
+          trap rollback ERR HUP INT TERM
+          python3 - <<'PY'
+          import os,pathlib,re,subprocess,tempfile
+          root=pathlib.Path(os.environ['POPUTI_8443_BACKUP'])
+          site=pathlib.Path((root/'site-path').read_text());env=pathlib.Path((root/'env-path').read_text())
+          config=(root/'nginx.before').read_text()
+          pattern=r'(^[ \t]*listen[ \t]+443[ \t]+ssl[^\n]*$)'
+          if len(re.findall(pattern,config,re.M))!=1:raise RuntimeError('Expected one IPv4 HTTPS listener')
+          config=re.sub(pattern,r'\1\n    listen 8443 ssl; # Po Puti verified alternate HTTPS entry',config,count=1,flags=re.M)
+          pid=int(subprocess.check_output(['systemctl','show','po-puti','-p','MainPID','--value'],text=True))
+          current='https://localhost,capacitor://localhost,http://localhost:8080'
+          for entry in pathlib.Path(f'/proc/{pid}/environ').read_bytes().split(b'\0'):
+              if entry.startswith(b'APP_ORIGINS='):current=entry.split(b'=',1)[1].decode()
+          origins=[x.strip() for x in current.split(',') if x.strip()]
+          for origin in ['https://vputipoputka.ru:8443','https://api.vputipoputka.ru:8443']:
+              if origin not in origins:origins.append(origin)
+          content=(root/'env.before').read_text()
+          line='APP_ORIGINS='+','.join(origins)
+          if re.search(r'^APP_ORIGINS=',content,re.M):content=re.sub(r'^APP_ORIGINS=[^\n]*',line,content,flags=re.M)
+          else:content=content.rstrip()+'\n'+line+'\n'
+          for target,text in [(site,config),(env,content)]:
+              stat=target.stat();fd,temp=tempfile.mkstemp(prefix='.po-puti-8443-',dir=target.parent)
+              try:
+                  with os.fdopen(fd,'w') as output:output.write(text);output.flush();os.fsync(output.fileno())
+                  os.chmod(temp,stat.st_mode&0o777);os.chown(temp,stat.st_uid,stat.st_gid);os.replace(temp,target)
+              finally:
+                  if os.path.exists(temp):os.unlink(temp)
+          PY
+          nginx -t
+          systemctl reload nginx
+          systemctl restart po-puti
+          healthy=0
+          for attempt in {1..12}; do
+            if curl --noproxy '*' -fsS --max-time 2 http://127.0.0.1:8080/api/health >/dev/null; then healthy=1; break; fi
+            sleep 1
+          done
+          test "$healthy" -eq 1
+          curl --noproxy '*' --resolve vputipoputka.ru:8443:127.0.0.1 -fsS --max-time 5 https://vputipoputka.ru:8443/api/health >/dev/null
+          trap - ERR HUP INT TERM
+          echo "BACKUP_DIR=$backup_dir"
+          echo "TIMER_UNIT=$unit"
+          echo 'HTTPS8443_TEST_READY: rollback timer remains armed'
+          REMOTE_SCRIPT
+          set -Eeuo pipefail
+          umask 077
+          test -n "$DEPLOY_HOST" && test -n "$DEPLOY_USER" && test -n "$DEPLOY_KEY" && test -n "$DEPLOY_KNOWN_HOSTS"
+          key_file="$RUNNER_TEMP/https8443.key"
+          hosts_file="$RUNNER_TEMP/https8443.hosts"
+          printf '%s\n' "$DEPLOY_KEY" > "$key_file"
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$hosts_file"
+          trap 'rm -f "$key_file" "$hosts_file"' EXIT
+          port="${DEPLOY_PORT:-22}"
+          [[ "$port" =~ ^[0-9]{1,5}$ ]]
+          ssh_cmd=(ssh -i "$key_file" -p "$port" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$hosts_file" -o ConnectTimeout=12)
+          backup_dir=''
+          timer=''
+          fail(){
+            code=$?
+            trap - ERR
+            if [[ "$backup_dir" =~ ^/var/backups/po-puti-https8443-[a-zA-Z0-9]+$ ]]; then
+              "${ssh_cmd[@]}" "$DEPLOY_USER@$DEPLOY_HOST" "sudo -n bash '$backup_dir/rollback.sh'" || true
+            fi
+            exit "$code"
+          }
+          trap fail ERR
+          "${ssh_cmd[@]}" "$DEPLOY_USER@$DEPLOY_HOST" 'sudo -n bash -s' < "$RUNNER_TEMP/enable-8443-remote.sh" > "$RUNNER_TEMP/prepare.txt" 2>&1
+          cat "$RUNNER_TEMP/prepare.txt"
+          backup_dir=$(sed -n 's/^BACKUP_DIR=//p' "$RUNNER_TEMP/prepare.txt")
+          timer=$(sed -n 's/^TIMER_UNIT=//p' "$RUNNER_TEMP/prepare.txt")
+          [[ "$backup_dir" =~ ^/var/backups/po-puti-https8443-[a-zA-Z0-9]+$ ]]
+          [[ "$timer" =~ ^po-puti-8443-rollback-[0-9]+-[0-9]+$ ]]
+          base='https://vputipoputka.ru:8443'
+          resolve=(--resolve vputipoputka.ru:8443:130.49.129.99)
+          for round in 1 2 3; do
+            for tls in 1.2 1.3; do
+              curl --noproxy '*' "${resolve[@]}" --tlsv"$tls" --tls-max "$tls" --connect-timeout 5 --max-time 8 -fsS -o "$RUNNER_TEMP/health.json" -w "VERIFY round=$round tls=$tls http=%{http_code} certificate=%{ssl_verify_result} total=%{time_total}\n" "$base/api/health"
+              python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))["ok"] is True' "$RUNNER_TEMP/health.json"
+            done
+          done
+          for resource in / /app.js /styles.css /sw.js /manifest.webmanifest /config.js; do
+            curl --noproxy '*' "${resolve[@]}" --connect-timeout 5 --max-time 8 -fsS "$base$resource" -o "$RUNNER_TEMP/asset"
+            test -s "$RUNNER_TEMP/asset"
+            if [ "$resource" = /app.js ]; then
+              echo 'e0b08951f750887199d46bf745a4543b10d053e26964e0387ca70d72629f2eb9  '"$RUNNER_TEMP/asset" | sha256sum -c -
+            fi
+            echo "ASSET_OK $resource"
+          done
+          status=$(curl --noproxy '*' "${resolve[@]}" -sS --connect-timeout 5 --max-time 8 -D "$RUNNER_TEMP/cors.headers" -o /dev/null -w '%{http_code}' -X OPTIONS -H "Origin: $base" -H 'Access-Control-Request-Method: POST' -H 'Access-Control-Request-Headers: authorization,content-type' "$base/api/state")
+          test "$status" = 204
+          grep -Fqi "access-control-allow-origin: $base" "$RUNNER_TEMP/cors.headers"
+          status=$(curl --noproxy '*' "${resolve[@]}" -sS --connect-timeout 5 --max-time 8 -o /dev/null -w '%{http_code}' -H "Origin: $base" "$base/api/state")
+          test "$status" = 401
+          status=$(curl --noproxy '*' "${resolve[@]}" -sS --connect-timeout 5 --max-time 8 -o /dev/null -w '%{http_code}' -X OPTIONS -H 'Origin: https://untrusted.invalid' "$base/api/state")
+          test "$status" = 403
+          status=$(curl --noproxy '*' "${resolve[@]}" -sS --connect-timeout 5 --max-time 8 -o /dev/null -w '%{http_code}' -X POST -H "Origin: $base" -H 'Content-Type: application/json' --data '{}' "$base/api/register")
+          test "$status" = 400
+          echo 'CORS_AUTH_VALIDATION_OK: approved origin allowed; unauthenticated state and untrusted origin denied; no accounts created'
+          "${ssh_cmd[@]}" "$DEPLOY_USER@$DEPLOY_HOST" "sudo -n bash -s -- '$backup_dir' '$timer'" <<'COMMIT'
+          set -euo pipefail
+          backup_dir="$1"
+          unit="$2"
+          [[ "$backup_dir" =~ ^/var/backups/po-puti-https8443-[a-zA-Z0-9]+$ ]]
+          [[ "$unit" =~ ^po-puti-8443-rollback-[0-9]+-[0-9]+$ ]]
+          systemctl is-active --quiet "$unit.timer"
+          if systemctl is-active --quiet "$unit.service"; then echo 'Rollback already started; refusing commit'; exit 2; fi
+          nginx -t
+          systemctl is-active --quiet nginx
+          systemctl is-active --quiet po-puti
+          curl --noproxy '*' --resolve vputipoputka.ru:8443:127.0.0.1 -fsS --max-time 5 https://vputipoputka.ru:8443/api/health >/dev/null
+          ss -H -ltn '( sport = :8443 )' | grep -q .
+          systemctl stop "$unit.timer"
+          echo "HTTPS8443_COMMITTED: configuration backup at $backup_dir"
+          COMMIT
+          trap - ERR
+          echo 'WORKAROUND_READY: https://vputipoputka.ru:8443/'
