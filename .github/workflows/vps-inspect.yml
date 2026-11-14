@@ -38,7 +38,7 @@ jobs:
           port="${DEPLOY_PORT:-22}"
           ssh -i "$key_file" -p "$port" -o BatchMode=yes -o IdentitiesOnly=yes \
             -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$hosts_file" -o ConnectTimeout=12 \
-            "$DEPLOY_USER@$DEPLOY_HOST" 'sudo -n bash -s' < deploy/inspect-vps.sh
+            "$DEPLOY_USER@$DEPLOY_HOST" 'if [ "$(id -u)" -eq 0 ]; then exec bash -s; else exec sudo -n bash -s; fi' < deploy/inspect-vps.sh
       - name: Save public deployment key for owner console recovery
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
