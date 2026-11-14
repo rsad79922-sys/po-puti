@@ -10,6 +10,12 @@ on:
         required: true
         type: string
 
+      initial_install:
+        description: 'Initial installation on a reinstalled Ubuntu server; existing application checkout is refused'
+        required: false
+        type: boolean
+        default: false
+
 permissions:
   contents: read
 
@@ -53,21 +59,24 @@ jobs:
           DEPLOY_KEY: ${{ secrets.POPUTI_DEPLOY_SSH_KEY }}
           DEPLOY_KNOWN_HOSTS: ${{ secrets.POPUTI_DEPLOY_KNOWN_HOSTS }}
           DEPLOY_PORT: ${{ secrets.POPUTI_DEPLOY_PORT }}
+          INITIAL_INSTALL: ${{ inputs.initial_install }}
         run: |
           set -euo pipefail
           test -n "$DEPLOY_HOST" && test -n "$DEPLOY_USER" && test -n "$DEPLOY_KEY" && test -n "$DEPLOY_KNOWN_HOSTS"
-          printf '%s\n' "$DEPLOY_KEY" > "$RUNNER_TEMP/po-puti-ssh.key"
-          chmod 0600 "$RUNNER_TEMP/po-puti-ssh.key"
-          trap 'rm -f "$RUNNER_TEMP/po-puti-ssh.key" "$RUNNER_TEMP/po-puti-known-hosts"' EXIT
-          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$RUNNER_TEMP/po-puti-known-hosts"
-          chmod 0600 "$RUNNER_TEMP/po-puti-known-hosts"
+          ssh_dir="$RUNNER_TEMP/publication-ssh"
+          trap 'rm -rf "$ssh_dir"' EXIT
+          bash deploy/prepare-ssh.sh "$ssh_dir"
           if [ -z "$DEPLOY_PORT" ]; then DEPLOY_PORT=22; fi
           [[ "$DEPLOY_PORT" =~ ^[0-9]{1,5}$ ]] || exit 2
-          ssh -i "$RUNNER_TEMP/po-puti-ssh.key" \
+          release_script=deploy/release-on-vps.sh
+          if [[ "$INITIAL_INSTALL" = true ]]; then release_script=deploy/bootstrap-vps.sh; fi
+          remote_command="sudo -n bash -s -- $GITHUB_SHA"
+          if [[ "$DEPLOY_USER" = root ]]; then remote_command="bash -s -- $GITHUB_SHA"; fi
+          ssh -i "$ssh_dir/key" \
             -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
-            -o UserKnownHostsFile="$RUNNER_TEMP/po-puti-known-hosts" \
+            -o UserKnownHostsFile="$ssh_dir/known_hosts" \
             -o ConnectTimeout=12 -p "$DEPLOY_PORT" \
-            "$DEPLOY_USER@$DEPLOY_HOST" "sudo -n bash -s -- $GITHUB_SHA" < deploy/release-on-vps.sh
+            "$DEPLOY_USER@$DEPLOY_HOST" "$remote_command" < "$release_script"
       - name: Verify public production assets from external GitHub runner
         run: |
           set -euo pipefail
