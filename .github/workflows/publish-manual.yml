@@ -28,7 +28,7 @@ jobs:
     uses: ./.github/workflows/verify.yml
   release:
     needs: verify
-    if: github.ref == 'refs/heads/main' && ((github.event_name == 'push' && vars.POPUTI_AUTO_DEPLOY == 'true') || (github.event_name == 'workflow_dispatch' && inputs.confirmation == 'publish-vputipoputka.ru'))
+    if: github.ref == 'refs/heads/main' && ((github.event_name == 'push' && vars.POPUTI_AUTO_DEPLOY != 'false') || (github.event_name == 'workflow_dispatch' && inputs.confirmation == 'publish-vputipoputka.ru'))
     runs-on: ubuntu-24.04
     environment: production
     timeout-minutes: 20
