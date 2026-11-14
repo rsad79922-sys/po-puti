@@ -39,7 +39,7 @@ try{
  expectOk(await call('/profile','POST',{name:'Фотограф',car:'Lada',phone:'',photo},token),'save avatar');
  let state=expectOk(await call('/state','GET',undefined,token),'state');
  const avatarUrl=state.users.find(u=>u.id===user.user.id).photo;
- assert.match(avatarUrl,/^\\/uploads\\/[a-f0-9]{32}\\.jpg$/,'avatar must be stored as a file URL');
+ assert.match(avatarUrl,/^\/uploads\/[a-f0-9]{32}\.jpg$/,'avatar must be stored as a file URL');
  const avatarResponse=await fetch('http://127.0.0.1:'+port+avatarUrl);
  assert.equal(avatarResponse.status,200);
  assert.equal((await avatarResponse.arrayBuffer()).byteLength,10,'avatar file bytes must be served');
@@ -48,7 +48,7 @@ try{
  const ride=expectOk(await call('/rides','POST',rideData,token),'publish with photo');
  state=expectOk(await call('/state','GET',undefined,token),'reload');
  const ridePhoto=state.rides.find(r=>r.id===ride.id).photo;
- assert.match(ridePhoto,/^\\/uploads\\/[a-f0-9]{32}\\.jpg$/,'ride photo must be returned as URL, never Base64');
+ assert.match(ridePhoto,/^\/uploads\/[a-f0-9]{32}\.jpg$/,'ride photo must be returned as URL, never Base64');
  assert.equal(JSON.stringify(state).includes('data:image'),false,'/state must not contain Base64 photos');
  assert.equal((await call('/profile','POST',{name:'Фотограф',photo:'data:image/svg+xml;base64,PHN2Zy8+'},token)).status,400,'SVG must be rejected');
  assert.equal((await call('/rides','POST',{...rideData,photo:'data:image/jpeg;base64,'+Buffer.alloc(120001,0xff).toString('base64')},token)).status,413,'oversized car photo must be rejected');
