@@ -1,0 +1,130 @@
+name: Temporary TLS port comparison
+on:
+  push:
+    branches: ['diagnostics/tls-20261114']
+    paths: ['.github/workflows/tls-port-compare.yml']
+permissions:
+  contents: read
+concurrency:
+  group: po-puti-tls-diagnosis
+  cancel-in-progress: false
+jobs:
+  diagnose:
+    runs-on: ubuntu-24.04
+    environment: production
+    timeout-minutes: 8
+    steps:
+      - name: Read server state while probing TLS from independent network
+        shell: bash
+        env:
+          DEPLOY_HOST: ${{ secrets.POPUTI_DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.POPUTI_DEPLOY_USER }}
+          DEPLOY_KEY: ${{ secrets.POPUTI_DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.POPUTI_DEPLOY_KNOWN_HOSTS }}
+          DEPLOY_PORT: ${{ secrets.POPUTI_DEPLOY_PORT }}
+        run: |
+          set -euo pipefail
+          umask 077
+          test -n "$DEPLOY_HOST" && test -n "$DEPLOY_USER" && test -n "$DEPLOY_KEY" && test -n "$DEPLOY_KNOWN_HOSTS"
+          key_file="$RUNNER_TEMP/tls-diagnosis.key"
+          hosts_file="$RUNNER_TEMP/tls-diagnosis.hosts"
+          printf '%s\n' "$DEPLOY_KEY" > "$key_file"
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$hosts_file"
+          trap 'rm -f "$key_file" "$hosts_file"' EXIT
+          port="${DEPLOY_PORT:-22}"
+          [[ "$port" =~ ^[0-9]{1,5}$ ]]
+          cat > "$RUNNER_TEMP/server-readonly.sh" <<'REMOTE'
+          set -u
+          probe_ip="$1"
+          [[ "$probe_ip" =~ ^[0-9.]+$ ]] || exit 2
+          date -u
+          uptime
+          free -m
+          ps -C nginx -o pid,stat,pcpu,pmem,rss
+          systemctl show nginx -p LimitNOFILE -p TasksCurrent
+          systemctl is-active po-puti nginx
+          ss -ltnp '( sport = :443 )'
+          ip -d link show eth0
+          sysctl net.ipv4.tcp_mtu_probing net.ipv4.tcp_base_mss
+          nginx -T 2>&1 | awk '/^[[:space:]]*(listen|server_name|ssl_protocols|ssl_ciphers|ssl_ecdh_curve|ssl_conf_command|ssl_handshake_timeout|ssl_buffer_size|ssl_session_cache|ssl_session_timeout|ssl_certificate|http2)[[:space:]]/{print}'
+          openssl x509 -in /etc/letsencrypt/live/vputipoputka.ru/fullchain.pem -noout -subject -issuer -dates -fingerprint -sha256
+          for target in 'http://127.0.0.1:8080/api/health' 'https://vputipoputka.ru/api/health'; do
+            curl --noproxy '*' -sS --resolve vputipoputka.ru:443:127.0.0.1 --connect-timeout 3 --max-time 5 -o /dev/null -w 'LOCAL http=%{http_code} tls=%{time_appconnect} total=%{time_total}\n' "$target" || true
+          done
+          if ss -H -ltn '( sport = :8443 )' | grep -q .; then echo RELAY_PORT_BUSY; exit 2; fi
+          relay_file=$(mktemp /tmp/po-puti-relay-XXXXXX.py)
+          capture=$(mktemp /tmp/po-puti-port-capture-XXXXXX)
+          cat > "$relay_file" <<'PYRELAY'
+          import select
+          import socket
+          import socketserver
+          class Relay(socketserver.BaseRequestHandler):
+              def handle(self):
+                  upstream=socket.create_connection(('127.0.0.1',443),timeout=5)
+                  try:
+                      self.request.settimeout(5)
+                      peers={self.request:upstream,upstream:self.request}
+                      while True:
+                          ready,_,_=select.select(list(peers),[],[],10)
+                          if not ready:break
+                          for source in ready:
+                              data=source.recv(65536)
+                              if not data:return
+                              peers[source].sendall(data)
+                  except (OSError,TimeoutError):pass
+                  finally:upstream.close()
+          class Server(socketserver.ThreadingTCPServer):
+              daemon_threads=True
+              allow_reuse_address=False
+          with Server(('0.0.0.0',8443),Relay) as server:
+              print('RELAY_READY',flush=True)
+              server.serve_forever()
+          PYRELAY
+          timeout 100 python3 "$relay_file" &
+          relay_pid=$!
+          timeout 95 tcpdump -nn -tttt -l -i eth0 -s 96 "(tcp port 80 or tcp port 443 or tcp port 8443) and host $probe_ip" > "$capture" 2>&1 &
+          cap_pid=$!
+          cleanup(){
+            for pid in "$relay_pid" "$cap_pid"; do
+              if jobs -pr | grep -qx "$pid"; then kill "$pid" 2>/dev/null || true; fi
+            done
+            rm -f "$capture" "$relay_file"
+          }
+          trap cleanup EXIT
+          sleep 1
+          if ! ss -H -ltn '( sport = :8443 )' | grep -q .; then echo RELAY_START_FAILED; exit 2; fi
+          echo CAPTURE_READY
+          wait "$cap_pid" || true
+          wait "$relay_pid" || true
+          sed -E 's/([0-9]{1,3}\.){3}[0-9]{1,3}/[ipv4]/g' "$capture" | tail -n 800
+          ss -H -ltn '( sport = :8443 )'
+          echo RELAY_STOPPED
+          REMOTE
+          ssh -i "$key_file" -p "$port" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$hosts_file" -o ConnectTimeout=12 "$DEPLOY_USER@$DEPLOY_HOST" 'sudo -n bash -s -- "${SSH_CONNECTION%% *}"' < "$RUNNER_TEMP/server-readonly.sh" > "$RUNNER_TEMP/remote.txt" 2>&1 &
+          remote_pid=$!
+          for attempt in {1..20}; do
+            if grep -q CAPTURE_READY "$RUNNER_TEMP/remote.txt"; then break; fi
+            if ! kill -0 "$remote_pid" 2>/dev/null; then cat "$RUNNER_TEMP/remote.txt"; exit 1; fi
+            sleep 1
+          done
+          grep -q CAPTURE_READY "$RUNNER_TEMP/remote.txt"
+          for round in 1 2 3; do
+            date -u
+            for target_port in 443 8443; do
+              curl --noproxy '*' --http1.1 --connect-to "vputipoputka.ru:443:130.49.129.99:$target_port" --connect-timeout 5 --max-time 7 -sS -o /dev/null -w "PORT round=$round target=$target_port http=%{http_code} verify=%{ssl_verify_result} connect=%{time_connect} handshake=%{time_appconnect} total=%{time_total}\n" 'https://vputipoputka.ru/api/health?probe=gh-port-comparison' || true
+            done
+          done
+          curl --noproxy '*' --resolve vputipoputka.ru:80:130.49.129.99 --connect-timeout 5 --max-time 7 -sS -o /dev/null -w 'HTTP_CONTROL port=80 http=%{http_code} total=%{time_total}\n' 'http://vputipoputka.ru/api/health?probe=gh-port-control' || true
+          python3 - <<'PLAIN'
+          import socket,time
+          for port in (80,443):
+              start=time.monotonic()
+              try:
+                  with socket.create_connection(('130.49.129.99',port),timeout=5) as s:
+                      s.settimeout(5)
+                      s.sendall(b'GET /api/health?probe=gh-plain-control HTTP/1.0\r\nHost: vputipoputka.ru\r\n\r\n')
+                      print('PLAIN_CONTROL',port,repr(s.recv(80)),round(time.monotonic()-start,3),flush=True)
+              except OSError as e:print('PLAIN_CONTROL',port,type(e).__name__,round(time.monotonic()-start,3),flush=True)
+          PLAIN
+          wait "$remote_pid"
+          cat "$RUNNER_TEMP/remote.txt"
