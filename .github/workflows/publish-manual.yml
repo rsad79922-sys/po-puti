@@ -56,16 +56,14 @@ jobs:
         run: |
           set -euo pipefail
           test -n "$DEPLOY_HOST" && test -n "$DEPLOY_USER" && test -n "$DEPLOY_KEY" && test -n "$DEPLOY_KNOWN_HOSTS"
-          printf '%s\n' "$DEPLOY_KEY" > "$RUNNER_TEMP/po-puti-ssh.key"
-          chmod 0600 "$RUNNER_TEMP/po-puti-ssh.key"
-          trap 'rm -f "$RUNNER_TEMP/po-puti-ssh.key" "$RUNNER_TEMP/po-puti-known-hosts"' EXIT
-          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$RUNNER_TEMP/po-puti-known-hosts"
-          chmod 0600 "$RUNNER_TEMP/po-puti-known-hosts"
+          ssh_dir="$RUNNER_TEMP/publication-ssh"
+          trap 'rm -rf "$ssh_dir"' EXIT
+          bash deploy/prepare-ssh.sh "$ssh_dir"
           if [ -z "$DEPLOY_PORT" ]; then DEPLOY_PORT=22; fi
           [[ "$DEPLOY_PORT" =~ ^[0-9]{1,5}$ ]] || exit 2
-          ssh -i "$RUNNER_TEMP/po-puti-ssh.key" \
+          ssh -i "$ssh_dir/key" \
             -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
-            -o UserKnownHostsFile="$RUNNER_TEMP/po-puti-known-hosts" \
+            -o UserKnownHostsFile="$ssh_dir/known_hosts" \
             -o ConnectTimeout=12 -p "$DEPLOY_PORT" \
             "$DEPLOY_USER@$DEPLOY_HOST" "sudo -n bash -s -- $GITHUB_SHA" < deploy/release-on-vps.sh
       - name: Verify public production assets from external GitHub runner
