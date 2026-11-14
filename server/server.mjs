@@ -308,4 +308,5 @@ if(process.env.ADMIN_USERNAME&&process.env.ADMIN_PASSWORD){
  if(!admin){const salt=crypto.randomBytes(20).toString('hex');run('INSERT INTO users(id,username,salt,hash,name,role,created) VALUES(?,?,?,?,?,?,?)',uid(),uname,salt,await saltHash(process.env.ADMIN_PASSWORD,salt),'Администратор','admin',now());console.log('Administrator account created:',uname)}
  else if(admin.role!=='admin')console.error('Admin username already exists without admin role; not escalating');
 }
-await migrateLegacyPhotos();\nserver.listen(PORT,HOST,()=>console.log(`По пути API running at http://${HOST}:${PORT}; database at ${DATA}`));
+await migrateLegacyPhotos();
+server.listen(PORT,HOST,()=>console.log(`По пути API running at http://${HOST}:${PORT}; database at ${DATA}`));
