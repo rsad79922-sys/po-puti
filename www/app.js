@@ -123,7 +123,9 @@ async function refreshRemote({fresh=false}={}){
      navigate('/login');
    }
    serverError=err.message;
-   render();
+   const active=document.activeElement;
+   const editing=['INPUT','TEXTAREA','SELECT'].includes(active?.tagName)&&active?.closest?.('form');
+   if(!editing)render();
    return false;
   }
  })().finally(()=>{stateRefreshInFlight=null;stateRefreshToken=''});
