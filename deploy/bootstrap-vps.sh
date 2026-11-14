@@ -7,6 +7,9 @@ export LC_ALL=C
 TARGET_SHA="${1:-}"
 [[ "$TARGET_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo 'Invalid commit SHA' >&2; exit 2; }
 [[ "$(id -u)" -eq 0 ]] || { echo 'Root installation required' >&2; exit 2; }
+# The shipped nginx/systemd configuration is verified against Ubuntu 24.04.
+. /etc/os-release
+[[ "$ID" = ubuntu && "$VERSION_ID" = 24.04 ]] || { echo 'Ubuntu 24.04 is required' >&2; exit 2; }
 APP=/opt/po-puti
 DATA=/var/lib/po-puti
 ENV_FILE=/etc/po-puti/po-puti.env
@@ -96,5 +99,6 @@ install -d -m 0755 /etc/letsencrypt/renewal-hooks/deploy
 printf '%s\n' '#!/bin/sh' 'nginx -t && systemctl reload nginx' > /etc/letsencrypt/renewal-hooks/deploy/po-puti-nginx
 chmod 0755 /etc/letsencrypt/renewal-hooks/deploy/po-puti-nginx
 systemctl enable --now certbot.timer po-puti-health.timer po-puti-backup.timer
+systemctl start po-puti-backup.service
 /usr/bin/node "$APP/deploy/healthcheck.mjs" https://vputipoputka.ru/api/health
 echo "INSTALL_OK: $TARGET_SHA; backups: $backup_dir"

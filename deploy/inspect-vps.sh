@@ -6,6 +6,8 @@ export LC_ALL=C
 date -u +%FT%TZ
 printf 'SERVICE_STATES\n'
 systemctl is-active po-puti nginx || true
+printf 'OPERATING_SYSTEM\n'
+sed -nE '/^(PRETTY_NAME|VERSION_ID)=/p' /etc/os-release
 printf 'RUNTIME\n'
 if command -v node >/dev/null; then node --version; else echo NODE_NOT_INSTALLED; fi
 if command -v nginx >/dev/null; then nginx -v 2>&1; else echo NGINX_NOT_INSTALLED; fi

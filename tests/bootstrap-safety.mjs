@@ -11,7 +11,8 @@ try{
  const aptMarker=join(dir,'apt-called');
  await writeFile(join(bin,'id'),'#!/bin/sh\necho 0\n',{mode:0o700});
  await writeFile(join(bin,'apt-get'),'#!/bin/sh\ntouch "$APT_TEST_MARKER"\nexit 93\n',{mode:0o700});
- const source=await readFile('deploy/bootstrap-vps.sh','utf8');
+ const osFile=join(dir,'os-release');await writeFile(osFile,'ID=ubuntu\nVERSION_ID=24.04\n');
+ const source=(await readFile('deploy/bootstrap-vps.sh','utf8')).replace('/etc/os-release',osFile);
  const path=join(dir,'bootstrap.sh');
  await writeFile(path,source.replace('APP=/opt/po-puti','APP='+app).replace('DATA=/var/lib/po-puti','DATA='+data).replace('/run/lock/po-puti-deploy.lock',join(dir,'lock')));
  const env={...process.env,PATH:bin+':'+process.env.PATH,APT_TEST_MARKER:aptMarker};
