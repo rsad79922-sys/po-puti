@@ -80,7 +80,8 @@ function requireAdmin(actor){if(actor.role!=='admin')throw jsonError('Нет п�
 function loggedIn(actor){const token=crypto.randomBytes(32).toString('base64url');run('INSERT INTO sessions VALUES(?,?,?)',sha(token),actor.id,now()+30*24*3600000);return {token,user:{id:actor.id,username:actor.username,role:actor.role}}}
 function rideById(id){const ride=q('SELECT * FROM rides WHERE id=?',id);if(!ride)throw jsonError('Поездка не найдена',404);return ride}
 function confirmed(rideId,id1,id2){const ride=q('SELECT driver_id FROM rides WHERE id=?',rideId);return Boolean(ride&&((ride.driver_id===id1 && q("SELECT id FROM requests WHERE ride_id=? AND user_id=? AND status='accepted'",rideId,id2))||(ride.driver_id===id2&&q("SELECT id FROM requests WHERE ride_id=? AND user_id=? AND status='accepted'",rideId,id1))));}
-function publicRide(r){return {id:r.id,driverId:r.driver_id,from:r.origin,to:r.destination,date:r.date,time:r.time,seats:r.seats,price:r.price,car:r.car,pickup:r.pickup,dropoff:r.dropoff,luggage:r.luggage,comment:r.comment,photo:r.photo,cancelled:!!r.cancelled};}
+const publicPhoto=value=>typeof value==='string'&&/^\/uploads\/[a-f0-9]{32}\.(?:jpg|png|webp)$/.test(value)?value:'';
+function publicRide(r){return {id:r.id,driverId:r.driver_id,from:r.origin,to:r.destination,date:r.date,time:r.time,seats:r.seats,price:r.price,car:r.car,pickup:r.pickup,dropoff:r.dropoff,luggage:r.luggage,comment:r.comment,photo:publicPhoto(r.photo),cancelled:!!r.cancelled};}
 function checkedPhoto(value, maxBytes){
  if(value===undefined||value===null||value==='')return '';
  if(typeof value!=='string'||value.length>Math.ceil(maxBytes*4/3)+80)throw jsonError('Слишком большое фото',413);
@@ -165,7 +166,7 @@ function state(actor){
   const batch=visible.slice(i,i+400);
   const placeholders=batch.map(()=>'?').join(',');
   for(const u of rows('SELECT id,username,name,phone,car,photo,role FROM users WHERE id IN ('+placeholders+')',...batch)){
-   users.push({...u,phone:peers.has(u.id)?u.phone:''});
+   users.push({...u,photo:publicPhoto(u.photo),phone:peers.has(u.id)?u.phone:''});
   }
  }
  const notifications=rows('SELECT * FROM notifications WHERE recipient_id=? ORDER BY created DESC LIMIT 300',actor.id).map(n=>({id:n.id,to:n.recipient_id,title:n.title,message:n.message,rideId:n.ride_id,read:!!n.read,created:n.created}));
