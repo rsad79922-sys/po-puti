@@ -8,7 +8,7 @@ const waiters=[];
 let requests=0;
 const listeners=new Map();
 let poll;
-const stubData={currentUserId:null,users:[],rides:[],requests:[],notifications:[],reviews:[],messages:[],reports:[]};
+const stubData={currentUserId:'test-user',users:[{id:'test-user',name:'Test',phone:''}],rides:[],requests:[],notifications:[],reviews:[],messages:[],reports:[]};
 const window={PO_PUTI_BACKEND:true,PO_PUTI_API_BASE:'',addEventListener:(event,fn)=>listeners.set(event,fn)};
 const root={innerHTML:''};
 const store=new Map([['po-puti-access-v2','token-for-test']]);
