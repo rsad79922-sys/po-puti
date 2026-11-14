@@ -41,7 +41,8 @@ assert.match(html, /id="app"/);
 assert.match(html, /id="boot-message"/);
 assert.match(html, /script\.onload=ready/);
 assert.match(html, /window\.PO_PUTI_BACKEND=true/);
-assert.doesNotMatch(files['www/sw.js'], /addEventListener\s*\(\s*['"]fetch['"]/, 'do not intercept navigation');
+assert.match(files['www/sw.js'], /addEventListener\s*\(\s*['"]fetch['"]/, 'Network First handler required');
+assert.match(files['www/sw.js'], /NETWORK_TIMEOUT_MS = 15000/);
 let level=0;
 const css=files['www/styles.css'];
 for(const match of css.matchAll(/[{}]/g)){
