@@ -30,9 +30,20 @@ jobs:
           ssh_dir="$RUNNER_TEMP/publication-ssh"
           trap 'rm -rf "$ssh_dir"' EXIT
           bash deploy/prepare-ssh.sh "$ssh_dir"
+          # Only the public half is exported; the private key stays in the runner.
+          ssh-keygen -y -f "$ssh_dir/key" > "$RUNNER_TEMP/po-puti-deploy.pub"
+          if [[ "$DEPLOY_USER" = root ]]; then echo DEPLOY_ACCOUNT_IS_ROOT=yes; else echo DEPLOY_ACCOUNT_IS_ROOT=no; fi
           key_file="$ssh_dir/key"
           hosts_file="$ssh_dir/known_hosts"
           port="${DEPLOY_PORT:-22}"
           ssh -i "$key_file" -p "$port" -o BatchMode=yes -o IdentitiesOnly=yes \
             -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$hosts_file" -o ConnectTimeout=12 \
             "$DEPLOY_USER@$DEPLOY_HOST" 'sudo -n bash -s' < deploy/inspect-vps.sh
+      - name: Save public deployment key for owner console recovery
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: po-puti-deploy-public-key
+          path: ${{ runner.temp }}/po-puti-deploy.pub
+          if-no-files-found: ignore
+          retention-days: 1
