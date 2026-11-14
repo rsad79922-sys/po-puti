@@ -7,10 +7,11 @@ TARGET_SHA="$1"
 APP=/opt/po-puti
 DB=/var/lib/po-puti/po-puti.sqlite
 BACKUP_ROOT=/var/backups/po-puti
+UPLOADS=/var/lib/po-puti/uploads
 
 if [[ ! "$TARGET_SHA" =~ ^[0-9a-f]{40}$ ]]; then echo 'Invalid commit SHA' >&2; exit 2; fi
 if [[ "$(id -u)" -ne 0 ]]; then echo 'Requires privileged deploy account (sudo -n)' >&2; exit 2; fi
-for cmd in git node systemctl curl mktemp install; do
+for cmd in git node systemctl curl mktemp install tar cp; do
   command -v "$cmd" >/dev/null || { echo "Missing command: $cmd" >&2; exit 2; }
 done
 test -d "$APP/.git" || { echo 'Missing git checkout' >&2; exit 2; }
@@ -37,6 +38,8 @@ git -C "$APP" cat-file -e "$TARGET_SHA:www/index.html"
 install -d -m 0700 "$BACKUP_ROOT"
 SHORT_SHA="$(printf '%s' "$TARGET_SHA" | cut -c1-8)"
 BACKUP="$BACKUP_ROOT/po-puti-$(date -u +%Y%m%dT%H%M%SZ)-$SHORT_SHA.sqlite"
+UPLOAD_BACKUP="$BACKUP_ROOT/po-puti-$(date -u +%Y%m%dT%H%M%SZ)-$SHORT_SHA-uploads.tar.gz"
+tar -C /var/lib/po-puti -czf "$UPLOAD_BACKUP" uploads
 export POPUTI_LIVE_DB="$DB" POPUTI_BACKUP_DB="$BACKUP"
 node --input-type=module <<'JS'
 import {DatabaseSync,backup} from 'node:sqlite';
@@ -71,6 +74,9 @@ rollback(){
   if [[ "$DEPLOY_STARTED" -eq 1 ]]; then
     echo "Release failed, restoring $PREVIOUS_SHA"
     systemctl stop po-puti || true
+    cp "$BACKUP" "$DB" || true
+    rm -rf "$UPLOADS" || true
+    tar -C /var/lib/po-puti -xzf "$UPLOAD_BACKUP" || true
     git -C "$APP" reset --hard "$PREVIOUS_SHA" || true
     systemctl start po-puti || true
     systemctl is-active --quiet po-puti || echo 'WARNING: service needs manual attention' >&2
