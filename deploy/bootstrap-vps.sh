@@ -33,6 +33,9 @@ git clone --branch main https://github.com/rsad79922-sys/po-puti.git "$APP"
 git -C "$APP" merge-base --is-ancestor "$TARGET_SHA" origin/main
 git -C "$APP" checkout --detach "$TARGET_SHA"
 git -C "$APP" switch -C main
+# Git inherits the private installer umask. Source contains only public repository
+# files; make it readable by the unprivileged runtime, without touching DATA/env.
+chmod -R a+rX "$APP"
 # Repeat isolated verification on the exact candidate before starting it.
 (cd "$APP" && /usr/bin/node scripts/check.mjs && /usr/bin/node scripts/test.mjs && /usr/bin/node scripts/build.mjs)
 backup_dir=$(mktemp -d /var/backups/po-puti-bootstrap-XXXXXXXX)
@@ -63,6 +66,9 @@ fi
 printf 'RELEASE_SHA=%s\n' "$TARGET_SHA" > /var/lib/po-puti-release.env
 chmod 0600 /var/lib/po-puti-release.env
 install -m 0644 "$APP"/deploy/po-puti.service "$APP"/deploy/po-puti-health.service "$APP"/deploy/po-puti-health.timer "$APP"/deploy/po-puti-backup.service "$APP"/deploy/po-puti-backup.timer /etc/systemd/system/
+runuser -u poputi -- test -r "$APP/server/server.mjs"
+runuser -u poputi -- test -r "$APP/www/index.html"
+runuser -u poputi -- test -r "$APP/deploy/healthcheck.mjs"
 systemctl daemon-reload
 systemctl enable --now po-puti
 healthy=0
