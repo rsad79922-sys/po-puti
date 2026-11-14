@@ -1,0 +1,12 @@
+[Unit]
+Description=Po Puti local health probe (failures in journal)
+After=po-puti.service
+[Service]
+Type=oneshot
+User=poputi
+Group=poputi
+ExecStart=/usr/bin/node /opt/po-puti/deploy/healthcheck.mjs
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true

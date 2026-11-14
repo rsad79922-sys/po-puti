@@ -9,13 +9,13 @@ const app=readFileSync(new URL('app.js',root),'utf8');
 
 assert.match(sw,/addEventListener\s*\(\s*['"]fetch['"]/, 'Network First handler required');
 assert.match(sw,/NETWORK_TIMEOUT_MS = 15000/);
-assert.match(sw,/CACHE_NAME = CACHE_PREFIX \+ 'network-first-v4'/,'shell release must use a fresh cache version');
+assert.match(sw,/CACHE_NAME = CACHE_PREFIX \+ 'network-first-v5'/,'shell release must use a fresh cache version');
 assert.doesNotMatch(sw,/event\.waitUntil\(caches\.open\(CACHE_NAME\)/,'cache updates must not call waitUntil after an awaited fetch');
 assert.match(sw,/caches\.delete/, 'old poisoned PWA caches must be cleared');
 assert.match(sw,/skipWaiting/);
 assert.match(sw,/clients\.claim/);
 assert.match(html,/id="boot-message"/, 'startup must be visible without JavaScript');
-assert.match(html,/app\.js\?v=boot14/, 'app should use an explicit cache-busting version');
+assert.match(html,/app\.js\?v=boot15/, 'app should use an explicit cache-busting version');
 assert.match(html,/script\.onload=ready/, 'startup should wait for script execution');
 assert.match(html,/<link rel="stylesheet" href="\/styles\.css/);
 assert.match(html,/<link rel="manifest" href="\/manifest\.webmanifest/);

@@ -4,18 +4,27 @@
   "private": true,
   "description": "Рабочий локальный прототип приложения По пути для Android и PWA",
   "scripts": {
-    "serve": "npx http-server www -p 8080 -c-1",
+    "serve": "http-server www -p 8080 -c-1",
     "android:add": "npx cap add android",
     "android:sync": "npx cap sync android",
     "android:open": "npx cap open android",
-    "server": "node server/server.mjs"
+    "server": "node server/server.mjs",
+    "check": "node scripts/check.mjs",
+    "test": "node scripts/test.mjs",
+    "test:browser": "node scripts/test.mjs --browser",
+    "build": "node scripts/build.mjs",
+    "verify": "npm run check && npm test && npm run build"
   },
   "dependencies": {
-    "@capacitor/core": "^7.0.0",
-    "@capacitor/android": "^7.0.0"
+    "@capacitor/android": "^7.0.0",
+    "@capacitor/core": "^7.0.0"
   },
   "devDependencies": {
     "@capacitor/cli": "^7.0.0",
-    "http-server": "^14.1.1"
+    "http-server": "^14.1.1",
+    "playwright": "1.65.1"
+  },
+  "engines": {
+    "node": ">=24.0.0 <25"
   }
 }

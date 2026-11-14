@@ -10,6 +10,7 @@
   <title>По пути — едем вместе</title>
   <link rel="stylesheet" href="/styles.css?v=boot13">
   <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="apple-touch-icon" href="/icons/icon-192.png">
   <link rel="icon" href="/icons/icon.svg" type="image/svg+xml">
   <style>
     html,body{margin:0;min-height:100%;background:#f5f7fb;color:#141b3b;font-family:-apple-system,system-ui,Arial,sans-serif;line-height:1.5}
@@ -65,7 +66,7 @@
     function loadApp(){
       status('Запускаем приложение…');
       var script=document.createElement('script');
-      script.src='/app.js?v=boot14';
+      script.src='/app.js?v=boot15';
       script.onload=ready;
       script.onerror=function(){fail('Не удалось загрузить app.js. Проверьте подключение.')};
       document.body.appendChild(script);
@@ -75,7 +76,7 @@
       started=true;
       // Production PWA uses a same-origin API. An extra config.js request is
       // unnecessary and has failed intermittently in iPhone Safari.
-      if(window.location.hostname==='vputipoputka.ru'){
+      if((window.location.hostname==='vputipoputka.ru'||window.location.protocol==='https:')&&!window.Capacitor&&new URLSearchParams(location.search).get('demo')!=='1'){
         window.PO_PUTI_BACKEND=true;
         window.PO_PUTI_API_BASE='';
         loadApp();
@@ -86,7 +87,11 @@
       var config=document.createElement('script');
       config.src='/config.js?v=boot12';
       config.onload=loadApp;
-      config.onerror=function(){fail('Не удалось загрузить config.js. Проверьте подключение.')};
+      config.onerror=function(){
+        if(navigator.serviceWorker&&navigator.serviceWorker.controller){
+          window.PO_PUTI_BACKEND=true;window.PO_PUTI_API_BASE='';loadApp();
+        }else fail('Не удалось загрузить config.js. Проверьте подключение.');
+      };
       document.body.appendChild(config);
     }
     /* Do not block navigation on CSS, manifest or a service worker. */

@@ -32,7 +32,7 @@ new vm.Script(scripts[0][1],{filename:'index inline bootstrap'});
 const manifest=JSON.parse(files['www/manifest.webmanifest']);
 assert.equal(manifest.scope,'./');
 assert.ok(manifest.start_url.startsWith('./'));
-const nginx=files['deploy/nginx-po-puti.conf'];
+const nginx=read('deploy/nginx-po-puti-tls.conf');
 const proxyTargets=[...nginx.matchAll(/proxy_pass\s+([^;]+);/g)].map(m=>m[1]);
 assert.ok(proxyTargets.length>0,'nginx backend proxy must exist');
 assert.ok(proxyTargets.every(v=>v==='http://127.0.0.1:8080'), 'nginx proxy URL invalid');

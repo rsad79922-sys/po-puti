@@ -1,0 +1,9 @@
+[Unit]
+Description=Daily Po Puti backup
+[Timer]
+OnCalendar=*-*-* 03:20:00 UTC
+Persistent=true
+RandomizedDelaySec=10m
+Unit=po-puti-backup.service
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,32 @@
+import assert from 'node:assert/strict';
+import {chromium,webkit} from 'playwright';
+import {isolatedServer} from './helpers/server.mjs';
+const app=await isolatedServer();
+let browser;
+try{
+ const engine=process.env.BROWSER_ENGINE||'chromium';
+ browser=await (engine==='webkit'?webkit:chromium).launch({headless:true,...(engine==='chromium'?{...(process.env.CHROMIUM_PATH?{executablePath:process.env.CHROMIUM_PATH}:{}),args:['--no-sandbox']}: {})});
+ const context=await browser.newContext();
+ const page=await context.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));
+ await page.goto(app.base);
+ await page.locator('[data-action="account-tab"][data-tab="register"]').click();
+ await page.locator('#reg-username').fill('cookie_browser');
+ await page.locator('#reg-password').fill('test-'+crypto.randomUUID());
+ await page.locator('[name="terms"]').check();await page.locator('#login-form button[type="submit"]').click();
+ await page.locator('#search-form').waitFor();
+ assert.equal(await page.evaluate(()=>localStorage.getItem('po-puti-access-v2')),null);
+ assert.equal(await page.evaluate(()=>document.cookie.includes('poputi_session')),false);
+ assert((await context.cookies()).some(c=>c.name==='poputi_session'&&c.httpOnly));
+ await page.reload();await page.locator('#search-form').waitFor();
+ const second=await context.newPage();await second.goto(app.base+'/#/profile');await second.locator('#profile-form').waitFor();
+ await page.goto(app.base+'/#/profile');
+ await page.locator('#profile-form [name="name"]').fill('<img src=x onerror=window.xss=1>');
+ await page.locator('#profile-form button[type="submit"]').click();
+ await page.waitForFunction(()=>document.querySelector('.profile-header')?.textContent.includes('<img src=x'));
+ assert.equal(await page.evaluate(()=>window.xss),undefined,'profile text must be escaped');
+ await page.locator('[data-action="logout"]').click();await page.locator('[data-action="logout-confirm"]').click();
+ await page.locator('#login-form').waitFor();await second.locator('#login-form').waitFor();
+ await page.reload();await page.locator('#login-form').waitFor();
+ assert.deepEqual(errors,[]);
+ console.log('PASS: HttpOnly web session survives reload, no localStorage token, escaped profile and cross-tab logout');
+}finally{if(browser)await browser.close();await app.stop()}

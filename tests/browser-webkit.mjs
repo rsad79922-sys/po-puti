@@ -31,7 +31,7 @@ console.log('Browser engine: '+(process.env.BROWSER_ENGINE||'webkit'));
 const origin='http://127.0.0.1:'+server.address().port;
 let browser;
 try{
- browser=await (process.env.BROWSER_ENGINE==='chromium'?chromium:webkit).launch({headless:true,...(process.env.BROWSER_ENGINE==='chromium'?{executablePath:process.env.CHROMIUM_PATH||'/usr/bin/chromium',args:['--no-sandbox']}: {})});
+ browser=await (process.env.BROWSER_ENGINE==='chromium'?chromium:webkit).launch({headless:true,...(process.env.BROWSER_ENGINE==='chromium'?{...(process.env.CHROMIUM_PATH?{executablePath:process.env.CHROMIUM_PATH}:{}),args:['--no-sandbox']}: {})});
  const context=await browser.newContext({...devices['iPhone 13'],serviceWorkers:'allow'});
  const page=await context.newPage();
  page.setDefaultTimeout(20000);

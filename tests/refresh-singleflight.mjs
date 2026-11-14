@@ -11,7 +11,7 @@ let poll;
 const stubData={currentUserId:'test-user',users:[{id:'test-user',name:'Test',phone:''}],rides:[],requests:[],notifications:[],reviews:[],messages:[],reports:[]};
 const window={PO_PUTI_BACKEND:true,PO_PUTI_API_BASE:'',addEventListener:(event,fn)=>listeners.set(event,fn)};
 const root={innerHTML:''};
-const store=new Map([['po-puti-access-v2','token-for-test']]);
+const store=new Map([['po-puti-cookie-session-v1','cookie:token-for-test']]);
 const context={
  window,location:{hash:'#/login',protocol:'https:'},
  navigator:{onLine:true},

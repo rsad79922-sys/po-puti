@@ -1,0 +1,63 @@
+name: Verify
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_call:
+permissions:
+  contents: read
+jobs:
+  test-build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm audit --audit-level=moderate
+      - run: npm run verify
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: po-puti-runtime
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
+  browsers:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        engine: [chromium, webkit]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npx playwright install --with-deps ${{ matrix.engine }}
+      - name: Real browser flows, cookie security, photo upload and PWA offline recovery
+        env:
+          BROWSER_ENGINE: ${{ matrix.engine }}
+          CHROMIUM_PATH: ''
+        run: npm run test:browser
+  ubuntu-config:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24'
+      - name: Validate stock Ubuntu nginx and systemd configuration without starting services
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y nginx openssl
+          node_binary="$(command -v node)"
+          if [[ "$node_binary" != /usr/bin/node ]]; then sudo ln -sfn "$node_binary" /usr/bin/node; fi
+          sudo bash deploy/check-config.sh

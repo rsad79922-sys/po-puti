@@ -13,7 +13,7 @@ const stateResolvers=[];
 let calls=0,postCalls=0;
 const noop=()=>{};
 const root={innerHTML:''};
-const storage=new Map([['po-puti-access-v2','session']]);
+const storage=new Map([['po-puti-cookie-session-v1','cookie:session']]);
 const listeners=new Map();
 const document={
  querySelector(sel){return sel==='#app'?root:null},
