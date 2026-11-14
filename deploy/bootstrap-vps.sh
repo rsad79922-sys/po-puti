@@ -8,6 +8,7 @@ TARGET_SHA="${1:-}"
 [[ "$TARGET_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo 'Invalid commit SHA' >&2; exit 2; }
 [[ "$(id -u)" -eq 0 ]] || { echo 'Root installation required' >&2; exit 2; }
 # The shipped nginx/systemd configuration is verified against Ubuntu 24.04.
+# shellcheck source=/dev/null
 . /etc/os-release
 [[ "$ID" = ubuntu && "$VERSION_ID" = 24.04 ]] || { echo 'Ubuntu 24.04 is required' >&2; exit 2; }
 APP=/opt/po-puti
