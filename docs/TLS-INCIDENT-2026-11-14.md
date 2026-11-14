@@ -2,7 +2,7 @@
 
 ## Current outcome
 
-The application fixes were installed manually by the owner and verified publicly as boot14. Later read-only SSH diagnostics succeeded using the existing GitHub production connection. No nginx, firewall, MTU, sysctl, application, or database settings were changed by these diagnostic runs. The external port 443 failure remains unresolved. A synchronized recurrence is now captured, and a temporary verified port 8443 relay succeeded while 443 failed. Subsequent successful connections alone are not evidence of a repair.
+The application fixes were installed manually by the owner and verified publicly as boot14. Later read-only SSH diagnostics succeeded using the existing GitHub production connection. No nginx, firewall, MTU, sysctl, application, or database settings were changed by these diagnostic runs. The external port 443 failure remains unresolved. After explicit owner approval, a persistent alternate HTTPS entry at https://vputipoputka.ru:8443/ was installed and verified. This mitigates access through an additional port; it does not repair or explain the upstream 443 failure.
 
 ## Reproduced failure
 
@@ -76,3 +76,18 @@ Automatic approval review rejected committing this push-triggered mitigation wor
 ### Additional evidence for AdminVPS support
 
 Please inspect external TCP/443 handling between 10:13 and 10:22 UTC. Guest capture shows TCP establishment with absent or incomplete application payload, while local HTTPS is healthy. A verified 8443-to-loopback-443 TCP relay returned HTTP 200 with the same nginx and certificate during simultaneous failures on external 443. Even a plain HTTP control request to 443 timed out, while port 80 responded. Check provider port-specific filtering/SYN proxy/anti-DDoS state and the host virtual switch; compare ingress/egress against the guest captures. No permanent workaround was installed.
+
+## Approved mitigation applied and verified (10:32 UTC)
+
+The owner explicitly authorized opening port 8443, changing nginx and CORS, restarting services and retaining the configuration after successful validation. The approved workflow completed successfully: https://github.com/rsad79922-sys/po-puti/actions/runs/43585751858 .
+
+- Added one `listen 8443 ssl` directive to the existing active site, preserving port 443 and the existing certificate.
+- Preserved the running APP_ORIGINS and appended only `https://vputipoputka.ru:8443` and `https://api.vputipoputka.ru:8443`.
+- Saved private configuration backups under `/var/backups/po-puti-https8443-khLpq16k`; nginx syntax validation passed.
+- An independent four-minute rollback timer was armed before modifications. After external checks passed, the timer was stopped and the changes retained at 10:32:44 UTC. No active temporary TCP relay is involved in the retained entry.
+- External AWS us-west-2 checks: 6/6 TLS 1.2/1.3 health requests returned 200 with certificate verification 0. HTML, app.js, CSS, Service Worker, manifest and config.js loaded. app.js SHA-256 matched the deployed approved code.
+- Approved-origin CORS preflight returned 204. Unauthenticated state returned 401; untrusted-origin preflight returned 403; invalid empty registration returned 400. No test accounts or application records were created.
+- Database and uploaded photos were not rewritten or restored. Account data remains in the same database. Browser login tokens are origin-specific, so a user opening :8443 may need to sign in again with their existing credentials.
+- Independent real Chromium mobile-viewport navigation at 10:35 UTC loaded the public login UI three times, removed the boot overlay, fetched health successfully and reopened after Service Worker activation without browser runtime errors. Evidence: https://github.com/rsad79922-sys/po-puti/actions/runs/43585944263 . No production accounts were used.
+
+The working web entry is **https://vputipoputka.ru:8443/**. Physical-phone verification and long-term cross-network stability are not established by these tests. Existing Android APKs still embed their previous API URL and are not automatically updated by changing nginx; a new Android configuration/build is a separate follow-up. The provider investigation for the original 443 failure remains open.
