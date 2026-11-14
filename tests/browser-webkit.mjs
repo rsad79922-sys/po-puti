@@ -10,7 +10,7 @@ import http from 'node:http';
 import {readFile} from 'node:fs/promises';
 import {fileURLToPath} from 'node:url';
 import {resolve, extname, sep} from 'node:path';
-import {webkit, devices} from 'playwright';
+import {webkit, chromium, devices} from 'playwright';
 
 const root=resolve(fileURLToPath(new URL('../www/',import.meta.url)));
 const mime={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.webmanifest':'application/manifest+json','.png':'image/png','.svg':'image/svg+xml'};
@@ -27,10 +27,11 @@ const server=http.createServer(async(req,res)=>{
  }catch{res.writeHead(404);res.end('Not found')}
 });
 await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+console.log('Browser engine: '+(process.env.BROWSER_ENGINE||'webkit'));
 const origin='http://127.0.0.1:'+server.address().port;
 let browser;
 try{
- browser=await webkit.launch({headless:true});
+ browser=await (process.env.BROWSER_ENGINE==='chromium'?chromium:webkit).launch({headless:true,...(process.env.BROWSER_ENGINE==='chromium'?{executablePath:process.env.CHROMIUM_PATH||'/usr/bin/chromium',args:['--no-sandbox']}: {})});
  const context=await browser.newContext({...devices['iPhone 13'],serviceWorkers:'allow'});
  const page=await context.newPage();
  page.setDefaultTimeout(20000);
@@ -55,6 +56,20 @@ try{
  await page.reload({waitUntil:'domcontentloaded',timeout:20000});
  await expectLogin('reload with installed Service Worker');
  console.log('WebKit iPhone reload with service worker OK');
+ // Reopen the already cached shell while the network is unavailable. API
+ // requests must remain network-only and must not be satisfied from shell cache.
+ await context.setOffline(true);
+ await page.reload({waitUntil:'domcontentloaded',timeout:20000});
+ await expectLogin('offline reopen with cached shell');
+ const apiStayedNetworkOnly=await page.evaluate(async()=>{
+  try{await fetch('/api/health',{cache:'no-store'});return false}catch{return true}
+ });
+ assert.equal(apiStayedNetworkOnly,true,'API requests must not be served by the shell cache');
+ console.log('WebKit iPhone offline reopen uses cached shell; API remains network-only');
+ await context.setOffline(false);
+ await page.reload({waitUntil:'domcontentloaded',timeout:20000});
+ await expectLogin('reopen after network recovery');
+ console.log('WebKit iPhone reopen after network recovery OK');
  await page.goto(origin+'/mobile-check.html',{waitUntil:'domcontentloaded',timeout:20000});
  assert.match(await page.locator('body').innerText(),/проверка загрузки/i);
  await page.goto(origin+'/',{waitUntil:'domcontentloaded',timeout:20000});

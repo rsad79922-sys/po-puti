@@ -4,9 +4,10 @@ import {readFileSync} from 'node:fs';
 import vm from 'node:vm';
 const source=readFileSync(new URL('../www/app.js', import.meta.url),'utf8');
 new vm.Script(source,{filename:'app.js'});
-function start(token){
+function start(token,preferences){
  const nodes={app:{innerHTML:''}};
  const storage=new Map(token?[['po-puti-access-v2',token]]:[]);
+ if(preferences!==undefined)storage.set('po-puti-ui-v2',preferences);
  const noop=()=>{};
  const location={hash:'#/login',protocol:'https:'};
  const document={
@@ -24,3 +25,6 @@ function start(token){
 const anonymous=start('');
 const returning=start('previous-session-token');
 console.log('Mobile startup smoke OK. Initial HTML lengths:',{anonymous,returning});
+
+for(const value of ['null','[]','42','{bad json','{"search":{"from":7},"draft":3}'])start('previous-session-token',value);
+console.log('PASS: malformed saved UI preferences do not crash startup');

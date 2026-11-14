@@ -7,15 +7,16 @@ import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import {resolve,extname,sep} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {webkit,devices} from 'playwright';
+import {webkit,chromium,devices} from 'playwright';
 
+console.log('Browser engine: '+(process.env.BROWSER_ENGINE||'webkit'));
 const origin='https://vputipoputka.ru';
 const root=resolve(fileURLToPath(new URL('../www/',import.meta.url)));
 const mime={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.svg':'image/svg+xml','.webmanifest':'application/manifest+json'};
 const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/Scj3JwAAAABJRU5ErkJggg==','base64');
 let browser;
 try{
- browser=await webkit.launch({headless:true});
+ browser=await (process.env.BROWSER_ENGINE==='chromium'?chromium:webkit).launch({headless:true,...(process.env.BROWSER_ENGINE==='chromium'?{executablePath:process.env.CHROMIUM_PATH||'/usr/bin/chromium',args:['--no-sandbox']}: {})});
  const context=await browser.newContext({...devices['iPhone 13'],serviceWorkers:'block'});
  await context.addInitScript(()=>{localStorage.setItem('po-puti-access-v2','fake-test-token')});
  const me={id:'user_1',username:'driver',name:'Тестовый водитель',phone:'',car:'Lada',photo:'',role:'user'};

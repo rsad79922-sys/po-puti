@@ -72,3 +72,5 @@ jobs:
         run: node tests/browser-webkit.mjs
       - name: Test iPhone Safari photo selection and upload
         run: node tests/browser-photo-upload.mjs
+      - name: Test full browser flow with isolated API
+        run: BROWSER_ENGINE=webkit node tests/browser-full-flow.mjs

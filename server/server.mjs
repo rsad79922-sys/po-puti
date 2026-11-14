@@ -81,7 +81,7 @@ function loggedIn(actor){const token=crypto.randomBytes(32).toString('base64url'
 function rideById(id){const ride=q('SELECT * FROM rides WHERE id=?',id);if(!ride)throw jsonError('Поездка не найдена',404);return ride}
 function confirmed(rideId,id1,id2){const ride=q('SELECT driver_id FROM rides WHERE id=?',rideId);return Boolean(ride&&((ride.driver_id===id1 && q("SELECT id FROM requests WHERE ride_id=? AND user_id=? AND status='accepted'",rideId,id2))||(ride.driver_id===id2&&q("SELECT id FROM requests WHERE ride_id=? AND user_id=? AND status='accepted'",rideId,id1))));}
 const publicPhoto=value=>typeof value==='string'&&/^\/uploads\/[a-f0-9]{32}\.(?:jpg|png|webp)$/.test(value)?value:'';
-function publicRide(r){return {id:r.id,driverId:r.driver_id,from:r.origin,to:r.destination,date:r.date,time:r.time,seats:r.seats,price:r.price,car:r.car,pickup:r.pickup,dropoff:r.dropoff,luggage:r.luggage,comment:r.comment,photo:publicPhoto(r.photo),cancelled:!!r.cancelled};}
+function publicRide(r){return {id:r.id,driverId:r.driver_id,from:r.origin,to:r.destination,date:r.date,time:r.time,seats:r.seats,price:r.price,car:r.car,pickup:r.pickup,dropoff:r.dropoff,luggage:r.luggage,comment:r.comment,photo:publicPhoto(r.photo),occupiedSeats:r.occupied_seats??q("SELECT COUNT(*) n FROM requests WHERE ride_id=? AND status='accepted'",r.id).n,cancelled:!!r.cancelled};}
 function checkedPhoto(value, maxBytes){
  if(value===undefined||value===null||value==='')return '';
  if(typeof value!=='string'||value.length>Math.ceil(maxBytes*4/3)+80)throw jsonError('Слишком большое фото',413);
@@ -147,7 +147,7 @@ function state(actor){
  // Discovery only needs upcoming rides, while each participant keeps access
  // to their own historical rides (driver or passenger). This bounds growth of
  // unrelated historical car photos in each recurring /state response.
- const rides=rows('SELECT * FROM rides WHERE date>=? OR driver_id=? OR id IN (SELECT ride_id FROM requests WHERE user_id=?) ORDER BY date,time',isoDay(),actor.id,actor.id).map(publicRide);
+ const rides=rows("SELECT rides.*, (SELECT COUNT(*) FROM requests WHERE ride_id=rides.id AND status='accepted') occupied_seats FROM rides WHERE date>=? OR driver_id=? OR id IN (SELECT ride_id FROM requests WHERE user_id=?) ORDER BY date,time",isoDay(),actor.id,actor.id).map(publicRide);
  const visibleIds=new Set([actor.id,...rides.map(r=>r.driverId)]);
  const peers=new Set([actor.id]);
  for(const r of reqs){
@@ -218,6 +218,8 @@ async function handleApi(req,path,data){const method=req.method;
    if(key){const prev=q('SELECT ride_id FROM ride_operations WHERE user_id=? AND client_key=?',actor.id,key);if(prev)return {id:prev.ride_id,repeated:true};}
    const photo=await storePhoto(data.photo,120000);
    return transaction(()=>{
+   // File writes yield the event loop: another request may have committed this key.
+   if(key){const prev=q('SELECT ride_id FROM ride_operations WHERE user_id=? AND client_key=?',actor.id,key);if(prev)return {id:prev.ride_id,repeated:true};}
    const id=uid();run('INSERT INTO rides VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',id,actor.id,from,to,date,time,seats,price,car,clean(data.pickup,150),clean(data.dropoff,150),clean(data.luggage,60),clean(data.comment,550),photo,0,now());if(key)run('INSERT INTO ride_operations VALUES(?,?,?)',actor.id,key,id);return {id};});
  }
  if(path==='/api/requests'&&method==='POST'){

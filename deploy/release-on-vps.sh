@@ -2,8 +2,9 @@
 # Explicit, manual release via GitHub Actions. No unattended deployment.
 # Only code and po-puti systemd service are changed. Nginx/firewall/DNS are untouched.
 set -Eeuo pipefail
+umask 077
 export LC_ALL=C
-TARGET_SHA="$1"
+TARGET_SHA="${1:-}"
 APP=/opt/po-puti
 DB=/var/lib/po-puti/po-puti.sqlite
 BACKUP_ROOT=/var/backups/po-puti
@@ -11,7 +12,7 @@ UPLOADS=/var/lib/po-puti/uploads
 
 if [[ ! "$TARGET_SHA" =~ ^[0-9a-f]{40}$ ]]; then echo 'Invalid commit SHA' >&2; exit 2; fi
 if [[ "$(id -u)" -ne 0 ]]; then echo 'Requires privileged deploy account (sudo -n)' >&2; exit 2; fi
-for cmd in git node systemctl curl mktemp install tar cp; do
+for cmd in git node systemctl curl mktemp install tar; do
   command -v "$cmd" >/dev/null || { echo "Missing command: $cmd" >&2; exit 2; }
 done
 test -d "$APP/.git" || { echo 'Missing git checkout' >&2; exit 2; }
@@ -39,7 +40,6 @@ install -d -m 0700 "$BACKUP_ROOT"
 SHORT_SHA="$(printf '%s' "$TARGET_SHA" | cut -c1-8)"
 BACKUP="$BACKUP_ROOT/po-puti-$(date -u +%Y%m%dT%H%M%SZ)-$SHORT_SHA.sqlite"
 UPLOAD_BACKUP="$BACKUP_ROOT/po-puti-$(date -u +%Y%m%dT%H%M%SZ)-$SHORT_SHA-uploads.tar.gz"
-tar -C /var/lib/po-puti -czf "$UPLOAD_BACKUP" uploads
 export POPUTI_LIVE_DB="$DB" POPUTI_BACKUP_DB="$BACKUP"
 node --input-type=module <<'JS'
 import {DatabaseSync,backup} from 'node:sqlite';
@@ -66,6 +66,16 @@ try{
 }
 JS
 
+# Images are append-only: capture them AFTER the SQLite snapshot so every
+# committed photo reference in that snapshot is included. Older releases may
+# not have an uploads directory yet.
+if [[ -d "$UPLOADS" ]]; then
+  tar -C /var/lib/po-puti -czf "$UPLOAD_BACKUP" uploads
+else
+  tar -czf "$UPLOAD_BACKUP" --files-from /dev/null
+fi
+tar -tzf "$UPLOAD_BACKUP" >/dev/null
+
 # Rollback previous source on failing service start or health check.
 DEPLOY_STARTED=0
 rollback(){
@@ -74,9 +84,9 @@ rollback(){
   if [[ "$DEPLOY_STARTED" -eq 1 ]]; then
     echo "Release failed, restoring $PREVIOUS_SHA"
     systemctl stop po-puti || true
-    cp "$BACKUP" "$DB" || true
-    rm -rf "$UPLOADS" || true
-    tar -C /var/lib/po-puti -xzf "$UPLOAD_BACKUP" || true
+    # Keep live data and uploaded files. Replacing only the main SQLite file
+    # while WAL/SHM exist can corrupt it and erase successful user writes.
+    # A data restore is a separate, offline operator procedure.
     git -C "$APP" reset --hard "$PREVIOUS_SHA" || true
     systemctl start po-puti || true
     systemctl is-active --quiet po-puti || echo 'WARNING: service needs manual attention' >&2
