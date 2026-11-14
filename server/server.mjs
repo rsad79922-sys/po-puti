@@ -5,7 +5,7 @@
  * Behind an HTTPS reverse proxy; never expose this directly on the public internet.
  */
 import http from 'node:http';
-import { readFile, mkdir } from 'node:fs/promises';
+import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join, resolve, extname, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -15,7 +15,9 @@ import { DatabaseSync } from 'node:sqlite';
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const WEB = resolve(ROOT, 'www');
 const DATA = resolve(process.env.DATA_DIR || join(ROOT, 'server-data'));
+const UPLOADS = join(DATA, 'uploads');
 await mkdir(DATA, {recursive:true, mode:0o700});
+await mkdir(UPLOADS, {recursive:true, mode:0o700});
 const database = new DatabaseSync(join(DATA,'po-puti.sqlite'));
 database.exec('PRAGMA journal_mode=WAL;PRAGMA foreign_keys=ON;PRAGMA busy_timeout=5000');
 database.exec(`
@@ -91,6 +93,26 @@ function checkedPhoto(value, maxBytes){
  const webp=match[1]==='webp'&&bytes.length>=12&&bytes.toString('ascii',0,4)==='RIFF'&&bytes.toString('ascii',8,12)==='WEBP';
  if(!jpg&&!png&&!webp)throw jsonError('Формат изображения не соответствует файлу');
  return value;
+}
+async function storePhoto(value,maxBytes){
+ if(!value)return '';
+ if(typeof value==='string' && /^\/uploads\/[a-f0-9]{32}\.(?:jpg|png|webp)$/.test(value))return value;
+ const data=checkedPhoto(value,maxBytes);
+ if(!data)return '';
+ const match=data.match(/^data:image\/(jpeg|png|webp);base64,/);
+ const ext=match[1]==='jpeg'?'jpg':match[1];
+ const filename=crypto.randomBytes(16).toString('hex')+'.'+ext;
+ await writeFile(join(UPLOADS,filename),Buffer.from(data.split(',')[1],'base64'),{flag:'wx',mode:0o600});
+ return '/uploads/'+filename;
+}
+async function migrateLegacyPhotos(){
+ for(const [table,idColumn] of [['users','id'],['rides','id']]){
+  const records=rows('SELECT '+idColumn+' AS id,photo FROM '+table+' WHERE photo LIKE ?', 'data:image/%');
+  for(const record of records){
+   try{const url=await storePhoto(record.photo,400000);run('UPDATE '+table+' SET photo=? WHERE '+idColumn+'=?',url,record.id)}
+   catch(error){console.error('[photo-migration]',table,record.id,error.message)}
+  }
+ }
 }
 function isoDay(){return new Date().toISOString().slice(0,10)}
 function parseBody(req){
@@ -182,7 +204,7 @@ async function handleApi(req,path,data){const method=req.method;
    const name=clean(data.name,60),car=clean(data.car,90),phone=clean(data.phone,24);
    if(!name)throw jsonError('Укажите имя');
    if(phone&&!/^[+\d ()-]{7,24}$/.test(phone))throw jsonError('Неверный формат телефона');
-   const photo=Object.hasOwn(data,'photo')?checkedPhoto(data.photo,300000):actor.photo||'';
+   const photo=Object.hasOwn(data,'photo')?await storePhoto(data.photo,300000):actor.photo||'';
    run('UPDATE users SET name=?,car=?,phone=?,photo=? WHERE id=?',name,car,phone,photo,actor.id);return {ok:true};
  }
  if(path==='/api/rides'&&method==='POST'){
@@ -193,7 +215,7 @@ async function handleApi(req,path,data){const method=req.method;
    if(!from||!to||from.toLowerCase()===to.toLowerCase()||!validDate||!validTime||date<isoDay()||!Number.isInteger(seats)||seats<1||seats>7||(!data.negotiable&&(!Number.isInteger(price)||price<0||price>100000))||!car)throw jsonError('Проверьте маршрут, дату, места, стоимость и автомобиль');
    const key=clean(data.clientKey,80);if(key&&!/^[a-zA-Z0-9_-]{10,80}$/.test(key))throw jsonError('Неверный идентификатор операции');
    return transaction(()=>{if(key){const prev=q('SELECT ride_id FROM ride_operations WHERE user_id=? AND client_key=?',actor.id,key);if(prev)return {id:prev.ride_id,repeated:true};}
-   const id=uid();run('INSERT INTO rides VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',id,actor.id,from,to,date,time,seats,price,car,clean(data.pickup,150),clean(data.dropoff,150),clean(data.luggage,60),clean(data.comment,550),checkedPhoto(data.photo,120000),0,now());if(key)run('INSERT INTO ride_operations VALUES(?,?,?)',actor.id,key,id);return {id};});
+   const id=uid();run('INSERT INTO rides VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',id,actor.id,from,to,date,time,seats,price,car,clean(data.pickup,150),clean(data.dropoff,150),clean(data.luggage,60),clean(data.comment,550),await storePhoto(data.photo,120000),0,now());if(key)run('INSERT INTO ride_operations VALUES(?,?,?)',actor.id,key,id);return {id};});
  }
  if(path==='/api/requests'&&method==='POST'){
    const ride=rideById(clean(data.rideId,100));if(ride.cancelled||ride.driver_id===actor.id||ride.date<isoDay())throw jsonError('Нельзя отправить заявку на эту поездку',409);
@@ -234,7 +256,7 @@ async function serveStatic(req,res,pathname){
  let path=pathname==='/'?'/index.html':pathname;
  try{path=decodeURIComponent(path)}catch{throw jsonError('Неверный путь',400)}
  if(appScreen.test(path) && String(req.headers.accept||'').includes('text/html')) path='/index.html';
- const file=resolve(WEB,'.'+path);
+ if(path.startsWith('/uploads/')){\n   const name=path.slice('/uploads/'.length);\n   if(!/^[a-f0-9]{32}\\.(?:jpg|png|webp)$/.test(name))throw jsonError('Файл не найден',404);\n   const file=join(UPLOADS,name);if(!existsSync(file))throw jsonError('Файл не найден',404);\n   const body=await readFile(file),type=name.endsWith('.jpg')?'image/jpeg':name.endsWith('.png')?'image/png':'image/webp';\n   res.writeHead(200,{'content-type':type,'cache-control':'public, max-age=31536000, immutable','x-content-type-options':'nosniff','content-length':body.length});res.end(req.method==='HEAD'?undefined:body);return;\n }\n const file=resolve(WEB,'.'+path);
  if(!file.startsWith(WEB+sep))throw jsonError('Доступ запрещён',403);
  if(!existsSync(file)){
    // Path only: do not log query strings, passwords or auth headers.
@@ -277,4 +299,4 @@ if(process.env.ADMIN_USERNAME&&process.env.ADMIN_PASSWORD){
  if(!admin){const salt=crypto.randomBytes(20).toString('hex');run('INSERT INTO users(id,username,salt,hash,name,role,created) VALUES(?,?,?,?,?,?,?)',uid(),uname,salt,await saltHash(process.env.ADMIN_PASSWORD,salt),'Администратор','admin',now());console.log('Administrator account created:',uname)}
  else if(admin.role!=='admin')console.error('Admin username already exists without admin role; not escalating');
 }
-server.listen(PORT,HOST,()=>console.log(`По пути API running at http://${HOST}:${PORT}; database at ${DATA}`));
+await migrateLegacyPhotos();\nserver.listen(PORT,HOST,()=>console.log(`По пути API running at http://${HOST}:${PORT}; database at ${DATA}`));
