@@ -2,7 +2,7 @@
    API traffic is never intercepted. Updates activate after old tabs close. */
 const CACHE_PREFIX = 'po-puti-shell-';
 const CACHE_NAME = CACHE_PREFIX + 'network-first-v1';
-const NETWORK_TIMEOUT_MS = 5000;
+const NETWORK_TIMEOUT_MS = 15000;
 const SHELL = new Map([
   ['/index.html', ['text/html']],
   ['/offline.html', ['text/html']],
@@ -48,14 +48,19 @@ async function fetchComplete(request, path) {
 
 self.addEventListener('install', event => {
   event.waitUntil((async () => {
-    // Download every required asset before publishing this cache.
-    // Failure leaves the previous worker active.
-    const entries = await Promise.all([...SHELL.keys()].map(async path =>
-      [cacheKey(path), await fetchComplete(new Request(cacheKey(path)), path)]
-    ));
     const cache = await caches.open(CACHE_NAME);
-    await Promise.all(entries.map(([key, response]) => cache.put(key, response)));
-    // No skipWaiting: do not replace a worker underneath an open application.
+    const required = ['/index.html', '/styles.css', '/app.js', '/offline.html'];
+    for (const path of required) {
+      const response = await fetchComplete(new Request(cacheKey(path)), path);
+      await cache.put(cacheKey(path), response);
+    }
+    await Promise.all([...SHELL.keys()].filter(path => !required.includes(path)).map(async path => {
+      try {
+        const response = await fetchComplete(new Request(cacheKey(path)), path);
+        await cache.put(cacheKey(path), response);
+      } catch { /* Optional asset. */ }
+    }));
+    await self.skipWaiting();
   })());
 });
 
