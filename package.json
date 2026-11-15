@@ -17,7 +17,10 @@
   },
   "dependencies": {
     "@capacitor/android": "^7.0.0",
-    "@capacitor/core": "^7.0.0"
+    "@capacitor/core": "^7.0.0",
+    "@capacitor/push-notifications": "7.0.7",
+    "google-auth-library": "11.3.4",
+    "web-push": "4.0.0"
   },
   "devDependencies": {
     "@capacitor/cli": "^7.0.0",

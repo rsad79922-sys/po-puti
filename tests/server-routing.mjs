@@ -34,11 +34,12 @@ try {
  const markup=await main.text();
  assert.match(markup,/<div id="app"/,'home must serve application entry HTML');
  assert.equal(main.headers.get('cache-control'),'no-store','HTML must not persist as stale PWA shell');
- for(const path of ['/index.html','/login','/search','/trips','/profile','/notifications','/admin','/ride/example','/reviews/example','/chat/ride/user']){
+ for(const path of ['/index.html','/login','/search','/trips','/profile','/notifications','/ride/example','/reviews/example','/chat/ride/user']){
   const response=await check(path);
   assert.equal(response.status,200,path+' must return SPA shell');
   assert.match(await response.text(),/<div id="app"/,path+' must contain app root');
  }
+ assert.equal((await check('/admin')).status,401,'admin HTML requires an authenticated admin session');
  const missing=await check('/missing-file.js','*/*');
  assert.equal(missing.status,404,'missing JS asset must not be silently replaced with HTML');
  assert.match((await missing.json()).error,/Файл не найден/);

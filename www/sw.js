@@ -1,7 +1,7 @@
 /* Network-first shell. Bump CACHE_NAME whenever the shell release changes.
    API traffic is never intercepted; the new worker activates immediately. */
 const CACHE_PREFIX = 'po-puti-shell-';
-const CACHE_NAME = CACHE_PREFIX + 'network-first-v5';
+const CACHE_NAME = CACHE_PREFIX + 'lifecycle-v3';
 const NETWORK_TIMEOUT_MS = 15000;
 const SHELL = new Map([
   ['/index.html', ['text/html']],
@@ -127,3 +127,7 @@ self.addEventListener('fetch', event => {
   // must never overwrite index.html. Query strings do not duplicate shell files.
   event.respondWith(networkFirst(event, shellPath, navigation));
 });
+
+// Push payloads contain only generic text and an authenticated in-app deep link.
+self.addEventListener('push',event=>{event.waitUntil((async()=>{let p={};try{p=event.data?.json()||{}}catch{}const path=typeof p.path==='string'&&/^\/(?:ride\/[a-zA-Z0-9_-]+|reviews\/[a-zA-Z0-9_-]+|notifications|complaints|admin)$/.test(p.path)?p.path:'/notifications';await self.registration.showNotification(p.title||'По пути',{body:'Откройте приложение, чтобы посмотреть уведомление.',tag:p.notificationId||'po-puti',data:{path,notificationId:p.notificationId},icon:'/icons/icon-192.png',badge:'/icons/icon-192.png'});if(self.navigator.setAppBadge&&Number.isInteger(p.badge))await self.navigator.setAppBadge(p.badge).catch(()=>{})})())});
+self.addEventListener('notificationclick',event=>{event.notification.close();event.waitUntil((async()=>{const path=event.notification.data?.path||'/notifications';const url=new URL('/#'+path,self.location.origin).href;const windows=await self.clients.matchAll({type:'window',includeUncontrolled:true});for(const client of windows){if(new URL(client.url).origin===self.location.origin){await client.navigate(url);await client.focus();return}}await self.clients.openWindow(url)})())});

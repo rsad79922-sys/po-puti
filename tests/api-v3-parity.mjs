@@ -1,0 +1,61 @@
+import assert from 'node:assert/strict';import {DatabaseSync} from 'node:sqlite';import {randomUUID} from 'node:crypto';import {spawnSync,spawn} from 'node:child_process';import {readdir} from 'node:fs/promises';
+import {isolatedServer} from './helpers/server.mjs';
+const app=await isolatedServer({APP_ORIGINS:'https://localhost'});let db;let base=app.base;let restarted;
+async function request(path,method='GET',body,client,extra={}){const response=await fetch(base+path,{method,headers:{...(body!==undefined?{'content-type':'application/json'}:{}),...(client?.token?{Authorization:'Bearer '+client.token,Origin:'https://localhost'}:{}),...(client?.cookie?{Cookie:client.cookie,'X-Po-Puti-Session':'cookie'}:{}),...extra},body:body===undefined?undefined:JSON.stringify(body)});let data;try{data=await response.json()}catch{data=null}return {status:response.status,data,headers:response.headers}}
+async function ok(...args){const result=await request(...args);assert.equal(result.status,200,JSON.stringify({path:args[0],...result}));return result}
+async function register(username,mode){const password='test-'+randomUUID();const result=await ok('/api/register','POST',{username,password,role:'admin'},null,mode==='cookie'?{'X-Po-Puti-Session':'cookie'}:{Origin:'https://localhost'});assert.equal(result.data.user.role,'user');return {...result.data,password,cookie:mode==='cookie'?result.headers.get('set-cookie').split(';')[0]:undefined}}
+try{
+ const driver=await register('native_driver','bearer'),passenger=await register('pwa_passenger','cookie'),outsider=await register('outsider','bearer'),moderator=await register('moderator','cookie');
+ for(const path of ['/api/admin/overview','/api/admin/v3/summary','/api/admin/v3/users','/api/admin/v3/rides','/api/admin/v3/bookings','/api/admin/v3/reviews','/api/admin/v3/complaints','/api/admin/v3/notifications','/api/admin/v3/deliveries','/api/admin/v3/audit','/api/admin/v3/system','/api/admin/unknown'])assert.equal((await request(path,'GET',undefined,passenger)).status,403,path);
+ assert.equal((await fetch(base+'/admin',{headers:{Cookie:passenger.cookie,Accept:'text/html'}})).status,403);
+ const promote=spawnSync(process.execPath,['scripts/admin-user.mjs','--user-id',moderator.user.id,'--reason','Verified owner in isolated test'],{env:{...process.env,DATA_DIR:app.dir},encoding:'utf8'});assert.equal(promote.status,0,promote.stderr);
+ assert.equal((await fetch(base+'/admin',{headers:{Cookie:moderator.cookie,Accept:'text/html'}})).status,200);
+ const future=new Date(Date.now()+3*86400000),date=future.toISOString().slice(0,10),body={from:'Москва',to:'Тверь',date,time:'12:00',seats:2,price:100,car:'Lada',departureAt:date+'T12:00:00+03:00',estimatedDurationMinutes:90,clientKey:'parity_'+randomUUID()};
+ const created=(await ok('/api/rides','POST',body,driver)).data;
+ const booking=(await ok('/api/requests','POST',{rideId:created.id},passenger)).data;await ok('/api/requests/'+booking.id+'/accept','POST',{},driver);
+ const a=(await ok('/api/state','GET',undefined,driver)).data,b=(await ok('/api/state','GET',undefined,passenger)).data;
+ const stable=r=>{const {serverNow,...state}=r;return state};
+ assert.deepEqual(stable(a.rides.find(x=>x.id===created.id)),stable(b.rides.find(x=>x.id===created.id)),'Native/PWA must use the same authoritative ride state');
+ assert.equal(a.rides.find(x=>x.id===created.id).etaSource,'driver_manual');
+ assert.equal((await request('/api/confirmations','POST',{rideId:created.id,answer:'yes'},passenger)).status,409);
+ db=new DatabaseSync(app.dir+'/po-puti.sqlite');
+ const departure=Date.now()-3*3600000,eta=Date.now()-2*3600000;
+ db.prepare('UPDATE rides SET departure_at=?,estimated_arrival_at=? WHERE id=?').run(departure,eta,created.id);
+ const pending=randomUUID();db.prepare('INSERT INTO requests(id,ride_id,user_id,status,created) VALUES(?,?,?,?,?)').run(pending,created.id,outsider.user.id,'pending',Date.now());
+ for(const [path,client] of [['/api/rides/'+created.id+'/cancel',driver],['/api/requests/'+booking.id+'/cancel',passenger],['/api/requests/'+pending+'/accept',driver],['/api/requests/'+pending+'/reject',driver],['/api/requests',outsider],['/api/admin/rides/'+created.id+'/cancel',moderator]])assert.equal((await request(path,'POST',{rideId:created.id,reason:'late'},client)).status,409,path);
+ const nativeState=(await ok('/api/state','GET',undefined,driver)).data,pwaState=(await ok('/api/state','GET',undefined,passenger)).data;
+ assert.equal(nativeState.requests.filter(r=>r.rideId===created.id).length,0,'historical driver must not receive application controls/data');
+ assert.equal(pwaState.requests.find(r=>r.id===booking.id).status,'accepted','confirmed booking remains in history');
+ assert.equal((await ok('/api/state','GET',undefined,outsider)).data.requests.find(r=>r.id===pending).status,'expired');
+ assert.equal((await ok('/api/confirmations','POST',{rideId:created.id,answer:'yes'},passenger)).data.openReview,true);
+ const review=(await ok('/api/reviews','POST',{rideId:created.id,score:4,body:'private-hidden-review'},passenger)).data;
+ assert(review.review.visibleAfterAt>=review.review.submittedAt+7*86400000);
+ await ok('/api/confirmations','POST',{rideId:created.id,answer:'yes'},driver);
+ assert(!JSON.stringify((await ok('/api/state','GET',undefined,driver)).data).includes('private-hidden-review'));
+ assert(!JSON.stringify((await ok('/api/reviews/public?userId='+driver.user.id,'GET',undefined,driver)).data).includes('private-hidden-review'));
+ assert.equal((await ok('/api/reviews','POST',{rideId:created.id,score:1,body:'replace'},passenger)).data.id,review.id);
+ for(const client of [driver,passenger,outsider])for(const method of ['PUT','PATCH','DELETE'])assert.equal((await request('/api/reviews/'+review.id,method,{score:1},client)).status,409);
+ assert((await ok('/api/admin/v3/reviews','GET',undefined,moderator)).data.items.some(r=>r.id===review.id&&r.text==='private-hidden-review'));
+ await ok('/api/admin/v3/reviews/'+review.id+'/block','POST',{reason:'Investigating complaint'},moderator);
+ assert.equal((await request('/api/admin/v3/reviews/'+review.id+'/unblock','POST',{},moderator)).status,400);
+ const complaint=(await ok('/api/complaints','POST',{rideId:created.id,reason:'Неверный факт поездки',details:'private complaint',category:'ride_fact'},passenger)).data;
+ assert.equal((await ok('/api/state','GET',undefined,driver)).data.rides.find(r=>r.id===created.id).outcome,'disputed');
+ assert(!JSON.stringify((await ok('/api/state','GET',undefined,outsider)).data).includes('private complaint'));
+ await ok('/api/admin/v3/complaints/'+complaint.id+'/resolve','POST',{decision:'completed',reason:'Проверены ответы сторон'},moderator);
+ assert((await ok('/api/state','GET',undefined,driver)).data.decisions.some(d=>d.comment==='Проверены ответы сторон'));
+ assert(!(await ok('/api/state','GET',undefined,outsider)).data.decisions.some(d=>d.comment==='Проверены ответы сторон'));
+ await ok('/api/admin/v3/users/'+outsider.user.id+'/block','POST',{reason:'Spam test'},moderator);
+ assert.equal((await request('/api/state','GET',undefined,outsider)).status,401);
+ assert.equal((await request('/api/login','POST',{username:'outsider',password:outsider.password})).status,403);
+ await ok('/api/admin/v3/users/'+outsider.user.id+'/unblock','POST',{reason:'Test completed'},moderator);
+ const audit=(await ok('/api/admin/v3/audit','GET',undefined,moderator)).data;assert(audit.total>=5);
+ const notifications=(await ok('/api/notifications','GET',undefined,passenger)).data;assert(notifications.unreadCount>0);
+ await ok('/api/notifications/read-all','POST',{},passenger);assert.equal((await ok('/api/notifications','GET',undefined,passenger)).data.unreadCount,0);
+ const count=db.prepare('SELECT COUNT(*) n FROM notifications').get().n;db.close();db=null;
+ app.child.kill('SIGTERM');await new Promise(r=>app.child.once('exit',r));
+ restarted=spawn(process.execPath,['server/server.mjs'],{env:{...process.env,HOST:'127.0.0.1',PORT:'0',DATA_DIR:app.dir,ADMIN_USERNAME:'',ADMIN_PASSWORD:'',PUBLIC_ORIGIN:''},stdio:['ignore','pipe','pipe']});let errors='';restarted.stderr.on('data',c=>errors+=c);
+ base=await new Promise((resolve,reject)=>{const t=setTimeout(()=>reject(Error(errors)),10000);restarted.stdout.on('data',c=>{const m=String(c).match(/http:\/\/127\.0\.0\.1:\d+/);if(m){clearTimeout(t);resolve(m[0])}});restarted.once('exit',()=>{clearTimeout(t);reject(Error(errors))})});
+ assert.equal((await ok('/api/state','GET',undefined,passenger)).data.notifications.length,notifications.items.length,'restart must not duplicate confirmation/reminder events');
+ db=new DatabaseSync(app.dir+'/po-puti.sqlite');assert.equal(db.prepare('SELECT COUNT(*) n FROM notifications').get().n,count);assert.equal((await readdir(app.dir+'/migration-backups')).filter(x=>x.startsWith('before-lifecycle')&&x.endsWith('.sqlite')).length,1);
+ console.log('PASS: PWA cookie / Android Bearer share API, UTC statuses and privacy; post-departure legacy operations blocked; admin role command/authorization, complaints, notifications, immutable reviews and restart deduplication');
+}finally{if(db)db.close();if(restarted&&restarted.exitCode===null){restarted.kill('SIGTERM');await new Promise(r=>restarted.once('exit',r))}await app.stop()}

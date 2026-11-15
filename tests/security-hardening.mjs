@@ -9,7 +9,7 @@ try{
  assert.equal(registration.status,200);
  const user=await registration.json();assert.equal(user.token,undefined,'cookie login must not expose a bearer token');
  const cookie=registration.headers.get('set-cookie');
- assert.match(cookie,/HttpOnly/);assert.match(cookie,/SameSite=Strict/);assert.match(cookie,/Path=\/api/);
+ assert.match(cookie,/HttpOnly/);assert.match(cookie,/SameSite=Strict/);assert.match(cookie,/Path=\/;/);
  const auth={Cookie:cookie.split(';')[0]};
  assert.equal((await request('/state',undefined,auth)).status,200);
  assert.equal((await request('/profile',{name:'csrf'}, {...auth,Origin:'https://localhost'})).status,403,'allowed native origin cannot use a web cookie');

@@ -54,7 +54,7 @@ try{
  try {
   fixture.prepare('INSERT INTO rides(id,driver_id,origin,destination,date,time,seats,price,car,created) VALUES(?,?,?,?,?,?,?,?,?,?)')
    .run(outsiderRideId,outsider.user.id,'Уфа','Ижевск',historical,'10:00',2,1000,'Ford',historicalAt);
-  fixture.prepare('INSERT INTO requests VALUES(?,?,?,?,?)')
+  fixture.prepare('INSERT INTO requests(id,ride_id,user_id,status,created) VALUES(?,?,?,?,?)')
    .run(crypto.randomUUID(),outsiderRideId,historicalPassenger.user.id,'accepted',historicalAt);
   fixture.prepare('INSERT INTO reviews VALUES(?,?,?,?,?,?,?)')
    .run(outsiderReviewId,outsiderRideId,outsider.user.id,historicalPassenger.user.id,5,'Отличная поездка',Date.now()-86400000);

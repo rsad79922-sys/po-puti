@@ -14,7 +14,7 @@ UPLOADS=/var/lib/po-puti/uploads
 
 if [[ ! "$TARGET_SHA" =~ ^[0-9a-f]{40}$ ]]; then echo 'Invalid commit SHA' >&2; exit 2; fi
 if [[ "$(id -u)" -ne 0 ]]; then echo 'Requires privileged deploy account (sudo -n)' >&2; exit 2; fi
-for cmd in git node systemctl curl mktemp install tar flock; do
+for cmd in git node npm systemctl curl mktemp install tar flock; do
   command -v "$cmd" >/dev/null || { echo "Missing command: $cmd" >&2; exit 2; }
 done
 test -d "$APP/.git" || { echo 'Missing git checkout' >&2; exit 2; }
@@ -42,7 +42,14 @@ git -C "$APP" cat-file -e "$TARGET_SHA:www/index.html"
 CANDIDATE=$(mktemp -d /tmp/po-puti-candidate.XXXXXXXX)
 trap 'rm -rf "$CANDIDATE"' EXIT
 git -C "$APP" archive "$TARGET_SHA" | tar -x -C "$CANDIDATE"
-(cd "$CANDIDATE" && node scripts/check.mjs && node scripts/test.mjs && node scripts/build.mjs)
+(cd "$CANDIDATE" && if [[ -f package-lock.json ]]; then (umask 022; npm ci --omit=dev --ignore-scripts); fi && node scripts/check.mjs && node scripts/test.mjs && node scripts/build.mjs)
+
+# A migrated database cannot be rolled back to positional INSERT statements.
+# Require a tested compatibility bridge BEFORE any migration reaches live data.
+if [[ -f "$CANDIDATE/server/lifecycle.mjs" ]] && grep -Eq 'INSERT INTO (rides|requests|notifications|reports) VALUES' "$APP/server/server.mjs"; then
+  echo 'ROLLBACK_BRIDGE_REQUIRED: install the explicit-column compatibility release before lifecycle v3' >&2
+  exit 2
+fi
 
 # Consistent online SQLite backup in WAL mode. Create destination exclusively.
 install -d -m 0700 "$BACKUP_ROOT"
@@ -87,6 +94,7 @@ tar -tzf "$UPLOAD_BACKUP" >/dev/null
 
 # Rollback previous source on failing service start or health check.
 DEPLOY_STARTED=0
+DEPS_CHANGED=0
 rollback(){
   local original_status=$?
   trap - ERR
@@ -98,6 +106,11 @@ rollback(){
     # A data restore is a separate, offline operator procedure.
     (umask 022; git -C "$APP" reset --hard "$PREVIOUS_SHA") || true
     printf "RELEASE_SHA=%s\n" "$PREVIOUS_SHA" > /var/lib/po-puti-release.env
+    if [[ "$DEPS_CHANGED" -eq 1 ]]; then
+      # Dependencies are disposable build output; never touch DATA_DIR or uploads.
+      rm -rf "$APP/node_modules"
+      if [[ -d "$CANDIDATE/previous-node_modules" ]]; then mv "$CANDIDATE/previous-node_modules" "$APP/node_modules"; fi
+    fi
     systemctl start po-puti || true
     systemctl is-active --quiet po-puti || echo 'WARNING: service needs manual attention' >&2
   fi
@@ -109,6 +122,11 @@ systemctl stop po-puti
 # Runtime source is public. Keep fresh tracked files readable by poputi while
 # preserving the private umask for backups, env and data outside this subshell.
 (umask 022; git -C "$APP" merge --ff-only "$TARGET_SHA")
+if [[ -d "$CANDIDATE/node_modules" ]]; then
+  if [[ -d "$APP/node_modules" ]]; then mv "$APP/node_modules" "$CANDIDATE/previous-node_modules"; fi
+  DEPS_CHANGED=1
+  mv "$CANDIDATE/node_modules" "$APP/node_modules"
+fi
 node --check "$APP/server/server.mjs"
 printf "RELEASE_SHA=%s\n" "$TARGET_SHA" > /var/lib/po-puti-release.env
 systemctl start po-puti

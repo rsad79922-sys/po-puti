@@ -26,8 +26,8 @@ else
 fi
 # Peer advertises the largest TCP payload it accepts in SYN or SYN-ACK.
 # Incoming SYN -> server-to-client packets; outgoing SYN-ACK -> client-to-server.
-incoming=(-p tcp --dport 443 --tcp-flags SYN,RST SYN -m comment --comment "$TAG" -j TCPMSS --set-mss 1200)
-outgoing=(-p tcp --sport 443 --tcp-flags SYN,RST SYN -m comment --comment "$TAG" -j TCPMSS --set-mss 1200)
+incoming=(-p tcp --dport 443 --tcp-flags "SYN,RST" SYN -m comment --comment "$TAG" -j TCPMSS --set-mss 1200)
+outgoing=(-p tcp --sport 443 --tcp-flags "SYN,RST" SYN -m comment --comment "$TAG" -j TCPMSS --set-mss 1200)
 rollback(){
  iptables -t mangle -D OUTPUT "${outgoing[@]}" >/dev/null 2>&1 || true
  iptables -t mangle -D PREROUTING "${incoming[@]}" >/dev/null 2>&1 || true
