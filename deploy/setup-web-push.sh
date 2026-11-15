@@ -13,7 +13,7 @@ const path='/etc/po-puti/push.env',read=p=>existsSync(p)?readFileSync(p,'utf8'):
 if(!!publicKey!==!!privateKey)throw Error('Incomplete existing VAPID configuration; refusing to rotate');
 if(publicKey){const curve=createECDH('prime256v1');try{curve.setPrivateKey(Buffer.from(privateKey,'base64url'));if(!curve.getPublicKey().equals(Buffer.from(publicKey,'base64url')))throw Error()}catch{throw Error('Existing VAPID pair is invalid; existing file preserved')}}else{const pair=generateVAPIDKeys();publicKey=pair.publicKey;privateKey=pair.privateKey}
 const subject=env.VAPID_SUBJECT||'https://vputipoputka.ru';if(!/^(?:mailto:|https:\/\/)/.test(subject)||/[\r\n]/.test(subject))throw Error('Invalid VAPID subject');
-const other=original.split('\n').filter(line=>!/^\s*VAPID_/.test(line)).join('\n');const temporary=path+'.pending-'+process.pid;writeFileSync(temporary,other+'\nVAPID_PUBLIC_KEY='+publicKey+'\nVAPID_PRIVATE_KEY='+privateKey+'\nVAPID_SUBJECT='+subject+'\n',{mode:0o600,flag:'wx'});renameSync(temporary,path);console.log('VAPID_PAIR_READY: existing valid keys retained or new pair generated privately');
+const other=original.split('\n').filter(line=>!/^\s*VAPID_/.test(line)).join('\n').trimEnd();const temporary=path+'.pending-'+process.pid;writeFileSync(temporary,other+'\nVAPID_PUBLIC_KEY='+publicKey+'\nVAPID_PRIVATE_KEY='+privateKey+'\nVAPID_SUBJECT='+subject+'\n',{mode:0o600,flag:'wx'});renameSync(temporary,path);console.log('VAPID_PAIR_READY: existing valid keys retained or new pair generated privately');
 JS
 chown root:poputi /etc/po-puti/push.env
 chmod 0640 /etc/po-puti/push.env
