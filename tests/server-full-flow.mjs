@@ -38,6 +38,10 @@ try{
    await new Promise(resolve=>setTimeout(resolve,100));
  }
  assert.ok(live,'Server failed: '+serverOutput);
+ // A rollback backend must tolerate additive columns without dropping live data.
+ const evolved=new DatabaseSync(join(temp,'po-puti.sqlite'));
+ for(const table of ['rides','requests','notifications','reports'])evolved.exec('ALTER TABLE '+table+' ADD COLUMN future_extension TEXT');
+ evolved.close();
  const suffix=crypto.randomBytes(6).toString('hex');
  const driver=await ok('/register','POST',{username:'drv_'+suffix,password:'correct-horse-battery-staple'});
  const passenger=await ok('/register','POST',{username:'psg_'+suffix,password:'correct-horse-battery-staple'});
@@ -54,7 +58,7 @@ try{
  try {
   fixture.prepare('INSERT INTO rides(id,driver_id,origin,destination,date,time,seats,price,car,created) VALUES(?,?,?,?,?,?,?,?,?,?)')
    .run(outsiderRideId,outsider.user.id,'Уфа','Ижевск',historical,'10:00',2,1000,'Ford',historicalAt);
-  fixture.prepare('INSERT INTO requests VALUES(?,?,?,?,?)')
+  fixture.prepare('INSERT INTO requests(id,ride_id,user_id,status,created) VALUES(?,?,?,?,?)')
    .run(crypto.randomUUID(),outsiderRideId,historicalPassenger.user.id,'accepted',historicalAt);
   fixture.prepare('INSERT INTO reviews VALUES(?,?,?,?,?,?,?)')
    .run(outsiderReviewId,outsiderRideId,outsider.user.id,historicalPassenger.user.id,5,'Отличная поездка',Date.now()-86400000);
