@@ -62,3 +62,8 @@ printf 'LOCAL_HTTPS\n'
 for port in 443 8443; do
  curl --noproxy '*' -sS --resolve "vputipoputka.ru:$port:127.0.0.1" --connect-timeout 2 --max-time 5 -o /dev/null -w "port=$port http=%{http_code} verify=%{ssl_verify_result}\n" "https://vputipoputka.ru:$port/api/health" || true
 done
+
+printf 'FREE_MAP_DOWNLOAD_CONNECTIVITY\n'
+for tls in 1.2 1.3; do
+ curl -4 --noproxy '*' --tlsv"$tls" --tls-max "$tls" --http1.1 --fail --silent --show-error --connect-timeout 8 --max-time 20 -o /dev/null -w "tls=$tls http=%{http_code} bytes=%{size_download} total=%{time_total}\n" https://brouter.de/brouter/segments4/ || true
+done

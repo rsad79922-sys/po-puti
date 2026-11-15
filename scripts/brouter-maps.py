@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Own BRouter OSM map cache; never opens application databases or uploads."""
-import concurrent.futures, hashlib, json, os, re, shutil, sys, time, urllib.request
+import concurrent.futures, hashlib, json, os, re, shutil, sys, time, urllib.request, ssl
 from pathlib import Path
 BASE='https://brouter.de/brouter/segments4/'
 MAGIC='po-puti-brouter-map-cache-v1'
@@ -20,7 +20,9 @@ def parse_index(body):
     if not records or len(records)>350 or any(r['size']<=0 or r['size']>1024**3 for r in records) or sum(r['size'] for r in records)>MAX_BYTES:raise RuntimeError('Map manifest outside safety bounds')
     return sorted(records,key=lambda r:r['name'])
 
-def request(url):return urllib.request.urlopen(urllib.request.Request(url,headers={'User-Agent':'PoPuti-self-hosted-BRouter/1 (offline map cache)'}),timeout=45)
+def request(url):
+    context=ssl.create_default_context();context.minimum_version=ssl.TLSVersion.TLSv1_2;context.maximum_version=ssl.TLSVersion.TLSv1_2
+    return urllib.request.urlopen(urllib.request.Request(url,headers={'User-Agent':'PoPuti-self-hosted-BRouter/1 (offline map cache)','Connection':'close','Accept-Encoding':'identity'}),timeout=45,context=context)
 
 def prune(root,keep):
     # A repeated update of the same snapshot must still retain the prior one.
@@ -50,7 +52,15 @@ def update(root):
     marker=root/'.po-puti-brouter-cache'
     if root.exists() and not marker.is_file() and any(root.iterdir()):raise RuntimeError('Existing directory is not a managed BRouter cache')
     root.mkdir(parents=True,exist_ok=True);root.chmod(0o750);marker.write_text(MAGIC+'\n')
-    with request(BASE) as response:records=parse_index(response.read(1000000).decode())
+    records=None
+    for attempt in range(3):
+        try:
+            with request(BASE) as response:records=parse_index(response.read(1000000).decode())
+            break
+        except Exception:
+            if attempt==2:raise
+            time.sleep(2)
+    if records is None:raise RuntimeError('Map index is unavailable')
     total=sum(r['size'] for r in records)
     if shutil.disk_usage(root).free<total+3*1024**3:raise RuntimeError('Insufficient free disk; leave 3 GiB for the application')
     snapshot='maps-'+hashlib.sha256(json.dumps(records,sort_keys=True).encode()).hexdigest()[:16]
