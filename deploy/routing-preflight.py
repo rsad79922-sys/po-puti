@@ -11,12 +11,12 @@ for path in (Path('/etc/po-puti/po-puti.env'), Path('/etc/po-puti/routing.env'))
         if not line or line.startswith('#') or '=' not in line:
             continue
         key, value = line.split('=', 1)
-        if key in ('ROUTING_PROVIDER', 'ROUTING_URL', 'ROUTING_API_KEY', 'ROUTING_FALLBACK_PROVIDER', 'ROUTING_FALLBACK_URL', 'ROUTING_FALLBACK_API_KEY', 'GEOCODING_URL'):
+        if key in ('ROUTING_PROVIDER', 'ROUTING_URL', 'ROUTING_API_KEY', 'ROUTING_FALLBACK_PROVIDER', 'ROUTING_FALLBACK_URL', 'ROUTING_FALLBACK_API_KEY', 'GEOCODING_URL', 'GEOCODING_PROVIDER', 'GEOCODING_API_KEY'):
             try:
                 parts = shlex.split(value, comments=True)
                 values[key] = bool(parts and parts[0])
             except ValueError:
                 values[key] = False
-for key in ('ROUTING_PROVIDER', 'ROUTING_URL', 'ROUTING_API_KEY', 'ROUTING_FALLBACK_PROVIDER', 'GEOCODING_URL'):
+for key in ('ROUTING_PROVIDER', 'ROUTING_URL', 'ROUTING_API_KEY', 'ROUTING_FALLBACK_PROVIDER', 'GEOCODING_URL', 'GEOCODING_PROVIDER', 'GEOCODING_API_KEY'):
     print('CONFIG_' + key + '_PRESENT=' + ('yes' if values.get(key) else 'no'))
 print('ROUTING_PREFLIGHT_READ_ONLY: no endpoint, key or user data exported; custom systemd environment sources require separate owner verification')
