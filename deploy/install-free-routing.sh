@@ -35,11 +35,11 @@ if [[ ! -d "$ROUTER/releases/$VERSION" ]]; then
   find "$ROUTER/releases/$VERSION" -type f -exec chmod 0644 {} +
 fi
 install -m 0755 "$SOURCE/scripts/brouter-maps.py" "$ROUTER/bin/brouter-maps.py"
-if [[ -n "${1:-}" ]]; then python3 "$ROUTER/bin/brouter-maps.py" --import "$DATA" "$1"; else python3 "$ROUTER/bin/brouter-maps.py" "$DATA"; fi
+if [[ "${1:-}" = --existing-maps ]]; then test -f "$DATA/current/.snapshot.json"; elif [[ -n "${1:-}" ]]; then python3 "$ROUTER/bin/brouter-maps.py" --import "$DATA" "$1"; else python3 "$ROUTER/bin/brouter-maps.py" "$DATA"; fi
 # Probe on a separate loopback port before replacing any live router unit/config.
 systemd-run --unit="$stage_unit" --uid=poputi-router --gid=poputi-router --collect \
-  -p MemoryMax=2048M -p CPUQuota=100% -p StandardOutput=null \
-  /usr/bin/java -Xms64m -Xmx1280m -DmaxRunningTime=28 -cp "$ROUTER/releases/$VERSION/brouter-$VERSION-all.jar" \
+  -p MemoryMax=2048M -p CPUQuota=150% -p StandardOutput=null \
+  /usr/bin/java -Xms64m -Xmx1280m -DmaxRunningTime=110 -cp "$ROUTER/releases/$VERSION/brouter-$VERSION-all.jar" \
   btools.server.RouteServer "$DATA/current" "$ROUTER/releases/$VERSION/profiles2" "$ROUTER/custom-profiles" 17778 1 127.0.0.1
 ready=0
 for ((attempt=0; attempt<15; attempt++)); do
