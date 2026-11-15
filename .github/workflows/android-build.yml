@@ -2,7 +2,7 @@ name: Android PWA shared-backend build
 on:
   pull_request:
     branches: [main]
-    paths: [www/**, server/**, tests/android/**, capacitor.config.json, package.json, package-lock.json, .github/workflows/android-build.yml]
+    paths: [www/**, server/**, tests/native-android/**, capacitor.config.json, package.json, package-lock.json, .github/workflows/android-build.yml]
   workflow_dispatch:
 permissions:
   contents: read
@@ -31,14 +31,14 @@ jobs:
           if [ -n "$FIREBASE_ANDROID_CONFIG_JSON" ]; then
             printf '%s' "$FIREBASE_ANDROID_CONFIG_JSON" > android/app/google-services.json
           fi
-          install -D -m 0644 tests/android/SharedUiSmokeTest.java android/app/src/androidTest/java/ru/poputi/app/SharedUiSmokeTest.java
+          install -D -m 0644 tests/native-android/SharedUiSmokeTest.java android/app/src/androidTest/java/ru/poputi/app/SharedUiSmokeTest.java
           npx cap sync android
           test -e android/app/src/main/assets/public/config.js
           grep -Fq "https://vputipoputka.ru" android/app/src/main/assets/public/config.js
       - name: Build Android debug APK
         run: cd android && ./gradlew assembleDebug --no-daemon
       - name: Verify byte-identical PWA assets inside the compiled APK
-        run: python3 tests/android/verify_assets.py
+        run: python3 tests/native-android/verify_assets.py
       - name: Enable KVM for the disposable Android emulator
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
