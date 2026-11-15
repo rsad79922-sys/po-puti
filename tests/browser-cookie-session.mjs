@@ -16,7 +16,7 @@ try{
  await page.locator('#search-form').waitFor();
  assert.equal(await page.evaluate(()=>localStorage.getItem('po-puti-access-v2')),null);
  assert.equal(await page.evaluate(()=>document.cookie.includes('poputi_session')),false);
- assert((await context.cookies()).some(c=>c.name==='poputi_session'&&c.httpOnly));
+ assert((await context.cookies()).some(c=>c.name==='poputi_session_v3'&&c.httpOnly));
  await page.reload();await page.locator('#search-form').waitFor();
  const second=await context.newPage();await second.goto(app.base+'/#/profile');await second.locator('#profile-form').waitFor();
  await page.goto(app.base+'/#/profile');

@@ -22,6 +22,7 @@ try{
  for(const path of ['scripts','server','www'])await mkdir(join(app,path));
  for(const file of ['scripts/check.mjs','scripts/test.mjs','scripts/build.mjs','server/server.mjs'])await writeFile(join(app,file),'// verified fixture\n');
  await writeFile(join(app,'www/index.html'),'<html>old</html>');
+ await writeFile(join(app,'.gitignore'),'node_modules/\n');await writeFile(join(app,'package-lock.json'),'{}');await mkdir(join(app,'node_modules'));await writeFile(join(app,'node_modules/runtime-marker'),'previous');
  run('git',['add','.'],app);run('git',['commit','-m','baseline'],app);run('git',['push','origin','main'],app);
  const previous=run('git',['rev-parse','HEAD'],app);
  await writeFile(join(app,'www/index.html'),'<html>new</html>');run('git',['commit','-am','candidate'],app);run('git',['push','origin','main'],app);
@@ -31,6 +32,7 @@ try{
  await mkdir(join(data,'uploads'));await writeFile(join(data,'uploads/photo.jpg'),'preserve-photo');
  const log=join(root,'systemctl.log');
  const stubs={
+  npm:'#!/bin/sh\numask 022\nmkdir -p node_modules\nprintf candidate > node_modules/runtime-marker\n',
   id:'#!/bin/sh\necho 0\n',
   systemctl:'#!/bin/sh\necho "$*" >> "$DEPLOY_TEST_LOG"\nexit 0\n',
   sleep:'#!/bin/sh\nexit 0\n',
@@ -48,6 +50,7 @@ try{
  result=spawnSync('bash',[scriptPath,candidate],{env:{...env,DEPLOY_TEST_MODE:'rollback'},encoding:'utf8'});
  assert.notEqual(result.status,0,result.stdout+result.stderr);assert.match(result.stdout,/Release failed, restoring/);
  assert.equal(run('git',['rev-parse','HEAD'],app),previous,'failed health rolls back code');
+ assert.equal(await readFile(join(app,'node_modules/runtime-marker'),'utf8'),'previous','restore previous runtime dependencies on rollback');
  // Retry with different timestamp-derived backup names; never overwrite an old backup.
  for(const entry of await readdir(backups))assert((await readFile(join(backups,entry))).length>0);
  const check=new DatabaseSync(join(data,'po-puti.sqlite'),{readOnly:true});assert.equal(check.prepare('SELECT id FROM users').get().id,'preserve-me');check.close();
@@ -57,6 +60,13 @@ try{
  result=spawnSync('bash',[scriptPath,candidate],{env:{...env,DEPLOY_TEST_MODE:'success'},encoding:'utf8'});
  assert.equal(result.status,0,result.stdout+result.stderr);assert.match(result.stdout,/RELEASE_OK/);
  assert.equal(run('git',['rev-parse','HEAD'],app),candidate);
+ assert.equal(await readFile(join(app,'node_modules/runtime-marker'),'utf8'),'candidate');
+ assert((await stat(join(app,'node_modules/runtime-marker'))).mode&0o004,'runtime dependencies must be readable');
  assert((await stat(join(app,'www/index.html'))).mode&0o004,'updated runtime source must remain readable by the service user');
+ // Refuse an unsafe rollback base BEFORE stopping production or migrating data.
+ await writeFile(join(app,'server/server.mjs'),"const sql='INSERT INTO rides VALUES(?)';\n");run('git',['commit','-am','unsafe positional rollback base'],app);run('git',['push','origin','main'],app);
+ const unsafe=run('git',['rev-parse','HEAD'],app);await writeFile(join(app,'server/lifecycle.mjs'),'// additive migration fixture\n');run('git',['add','.'],app);run('git',['commit','-m','migration candidate'],app);run('git',['push','origin','main'],app);const migrated=run('git',['rev-parse','HEAD'],app);run('git',['reset','--hard',unsafe],app);await writeFile(log,'');
+ result=spawnSync('bash',[scriptPath,migrated],{env:{...env,DEPLOY_TEST_SHA:migrated,DEPLOY_TEST_MODE:'success'},encoding:'utf8'});
+ assert.notEqual(result.status,0);assert.match(result.stderr,/ROLLBACK_BRIDGE_REQUIRED/);assert(!(await readFile(log,'utf8')).includes('stop'));assert.equal(run('git',['rev-parse','HEAD'],app),unsafe);
  console.log('PASS: deployment refuses failed preflight; failed HTTPS rolls back code; success installs exact SHA; database and photos preserved');
 }finally{await rm(root,{recursive:true,force:true})}

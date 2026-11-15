@@ -1,0 +1,42 @@
+name: Private migration rehearsal
+on:
+  push:
+    branches: [feature/unified-trip-lifecycle-v3]
+    paths: [.github/workflows/migration-rehearsal.yml, server/**, scripts/validate-lifecycle-copy.mjs, deploy/validate-lifecycle-copy.sh]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: po-puti-production
+  cancel-in-progress: false
+jobs:
+  verify:
+    uses: ./.github/workflows/verify.yml
+    permissions:
+      contents: read
+  rehearse:
+    needs: verify
+    runs-on: ubuntu-24.04
+    environment: production
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Validate a private copy on the VPS without changing the live database
+        env:
+          DEPLOY_HOST: ${{ secrets.POPUTI_DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.POPUTI_DEPLOY_USER }}
+          DEPLOY_KEY: ${{ secrets.POPUTI_DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.POPUTI_DEPLOY_KNOWN_HOSTS }}
+          DEPLOY_PORT: ${{ secrets.POPUTI_DEPLOY_PORT }}
+          CANDIDATE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          umask 077
+          ssh_dir="$RUNNER_TEMP/rehearsal-ssh"
+          trap 'rm -rf "$ssh_dir"' EXIT
+          bash deploy/prepare-ssh.sh "$ssh_dir"
+          [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          { printf 'set -- %s\n' "$CANDIDATE_SHA"; cat deploy/validate-lifecycle-copy.sh; } > "$ssh_dir/rehearse.sh"
+          ssh -i "$ssh_dir/key" -p "${DEPLOY_PORT:-22}" -o BatchMode=yes -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$ssh_dir/known_hosts" -o ConnectTimeout=12 \
+            "$DEPLOY_USER@$DEPLOY_HOST" 'if [ "$(id -u)" -eq 0 ]; then exec bash -s; else exec sudo -n bash -s; fi' < "$ssh_dir/rehearse.sh"

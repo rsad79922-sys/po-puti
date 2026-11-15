@@ -67,6 +67,7 @@ try{
  await page.locator('[name="time"]').fill('12:30');
  await page.locator('[name="price"]').fill('1000');
  await page.locator('[name="car"]').fill('Lada');
+ await page.locator('[name="estimatedDurationMinutes"]').fill('90');
  await page.locator('#pub-photo').setInputFiles({name:'car.png',mimeType:'image/png',buffer:png});
  await page.getByText('Фото готово и будет добавлено при публикации поездки.').waitFor();
  assert.equal(await page.locator('#pub-photo-preview').count(),1,'car preview must display after selection');

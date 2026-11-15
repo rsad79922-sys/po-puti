@@ -51,6 +51,7 @@ try{
  await driver.locator('#pub-seats').selectOption('1');
  await driver.locator('#pub-price').fill('900');
  await driver.locator('#pub-car').fill('Lada');
+ await driver.locator('[name=estimatedDurationMinutes]').fill('90');
  await driver.locator('#publish-form button[type="submit"]').click();
  await driver.locator('[data-action="publish-confirm"]').click();
  await driver.waitForURL('**/#/ride/*');

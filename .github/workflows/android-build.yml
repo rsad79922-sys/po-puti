@@ -24,8 +24,13 @@ jobs:
       - name: Check native API integration
         run: node tests/native-config.mjs
       - name: Generate the native Android wrapper and synchronize shared web app
+        env:
+          FIREBASE_ANDROID_CONFIG_JSON: ${{ secrets.FIREBASE_ANDROID_CONFIG_JSON }}
         run: |
           npx cap add android
+          if [ -n "$FIREBASE_ANDROID_CONFIG_JSON" ]; then
+            printf '%s' "$FIREBASE_ANDROID_CONFIG_JSON" > android/app/google-services.json
+          fi
           npx cap sync android
           test -e android/app/src/main/assets/public/config.js
           grep -Fq "https://vputipoputka.ru" android/app/src/main/assets/public/config.js

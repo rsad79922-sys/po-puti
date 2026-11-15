@@ -40,6 +40,7 @@ git -C "$APP" switch -C main
 # Git inherits the private installer umask. Source contains only public repository
 # files; make it readable by the unprivileged runtime, without touching DATA/env.
 chmod -R a+rX "$APP"
+(cd "$APP" && umask 022 && npm ci --omit=dev --ignore-scripts)
 # Repeat isolated verification on the exact candidate before starting it.
 (cd "$APP" && /usr/bin/node scripts/check.mjs && /usr/bin/node scripts/test.mjs && /usr/bin/node scripts/build.mjs)
 backup_dir=$(mktemp -d /var/backups/po-puti-bootstrap-XXXXXXXX)

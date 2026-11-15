@@ -61,7 +61,7 @@ sudo test ! -e /etc/po-puti/po-puti.env && sudo install -m 0640 -o root -g poput
 sudoedit /etc/po-puti/po-puti.env
 ```
 
-PUBLIC_ORIGIN должен быть точным HTTPS origin без завершающего `/`; HOST=127.0.0.1, DATA_DIR=/var/lib/po-puti. Укажите приватно ADMIN_USERNAME и стойкий ADMIN_PASSWORD для первого старта. Удобно сгенерировать пароль менеджером паролей; не включайте его в команды shell, код, PR или GitHub Actions. После создания администратора удалите ADMIN_PASSWORD из env. Переменные не меняют пароль существующего аккаунта и не повышают права существующего пользователя.
+PUBLIC_ORIGIN должен быть точным HTTPS origin без завершающего `/`; HOST=127.0.0.1, DATA_DIR=/var/lib/po-puti. Первого администратора назначайте серверной командой по ID уже зарегистрированного владельца: [инструкция v3](../docs/LIFECYCLE-V3.md). ADMIN_USERNAME/ADMIN_PASSWORD больше не создают администратора. Настройка VAPID/FCM и обязательный compatibility bridge для обновления старой БД описаны там же.
 
 ## 3. systemd и журналы
 
