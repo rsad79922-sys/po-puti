@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Own free routing only. Application DB, uploads, nginx and firewall are untouched.
+# Own free routing only. Application DB, uploads and firewall are untouched.
 set -Eeuo pipefail
 umask 077
 [[ "$(id -u)" -eq 0 ]] || exit 2
@@ -75,6 +75,13 @@ install -d -m 0755 /etc/systemd/system/po-puti.service.d
 if [[ -f /etc/systemd/system/po-puti.service.d/40-routing.conf ]]; then cp -a /etc/systemd/system/po-puti.service.d/40-routing.conf "$config_backup/40-routing.conf.before"; fi
 printf '[Service]\nEnvironmentFile=/etc/po-puti/routing.env\n' > /etc/systemd/system/po-puti.service.d/40-routing.conf
 chmod 0644 /etc/systemd/system/po-puti.service.d/40-routing.conf
+# Extend only the authenticated route-estimate endpoint, preserving all other TLS settings.
+site=/etc/nginx/sites-available/po-puti
+if [[ -f "$site" ]]; then
+ cp -a "$site" "$config_backup/nginx.before"
+ python3 "$SOURCE/scripts/route-proxy-timeout.py" "$site"
+ if nginx -t; then systemctl reload nginx; else cp -a "$config_backup/nginx.before" "$site"; exit 1; fi
+fi
 systemctl daemon-reload
 # API restart is performed by the separate verified application release.
 echo "FREE_ROUTING_INSTALLED: owned BRouter, OSM Russia offline maps, loopback only; zero paid API keys; application data untouched; config backup: $config_backup"
