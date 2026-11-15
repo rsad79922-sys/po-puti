@@ -2,7 +2,7 @@ name: Android PWA shared-backend build
 on:
   pull_request:
     branches: [main]
-    paths: [www/**, server/**, tests/native-android/**, capacitor.config.json, package.json, package-lock.json, .github/workflows/android-build.yml]
+    paths: [www/**, server/**, tests/native-android/**, native/**, scripts/prepare-android.mjs, capacitor.config.json, package.json, package-lock.json, .github/workflows/android-build.yml]
   workflow_dispatch:
   workflow_call:
     secrets:
@@ -32,6 +32,7 @@ jobs:
           FIREBASE_ANDROID_CONFIG_JSON: ${{ secrets.FIREBASE_ANDROID_CONFIG_JSON }}
         run: |
           npx cap add android
+          node scripts/prepare-android.mjs
           if [ -n "$FIREBASE_ANDROID_CONFIG_JSON" ]; then
             printf '%s' "$FIREBASE_ANDROID_CONFIG_JSON" > android/app/google-services.json
           fi

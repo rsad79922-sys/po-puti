@@ -1,5 +1,5 @@
 node_modules/
-android/
+/android/
 server-data/
 .env
 .env.*

@@ -41,6 +41,8 @@ try{
      rides.unshift({id:'ride_1',driverId:me.id,...ridePayload,photo:ridePayload.photo||'',cancelled:false});
      return json({id:'ride_1'});
    }
+   if(path==='/api/places'){const east=url.searchParams.get('q').includes('Ижевск');return json({items:[{address:url.searchParams.get('q'),lon:east?53.2:49.1,lat:east?56.85:55.79,timeZone:east?'Europe/Samara':'Europe/Moscow'}]})}
+   if(path==='/api/routes/estimate'){const d=route.request().postDataJSON();const departure=Date.parse(d.date+'T'+d.time+':00+04:00');return json({available:true,routeQuoteId:'photo-test-owned-quote',departureTimeZone:'Europe/Samara',destinationTimeZone:'Europe/Moscow',durationMinutes:90,distanceM:180000,departureAt:departure,arrivalAt:departure+5400000,arrivalLocal:{local:d.date+' 13:00',timeZone:'Europe/Moscow',offset:'+03:00'},etaSource:'osrm'})}
    if(path==='/api/health')return json({ok:true,backend:'sqlite'});
    const filename=resolve(root,'.'+(path==='/'?'/index.html':path));
    if(!filename.startsWith(root+sep))return route.fulfill({status:403,body:'Forbidden'});
@@ -67,7 +69,7 @@ try{
  await page.locator('[name="time"]').fill('12:30');
  await page.locator('[name="price"]').fill('1000');
  await page.locator('[name="car"]').fill('Lada');
- await page.locator('[name="estimatedDurationMinutes"]').fill('90');
+ await page.waitForFunction(()=>!!db.draft?.routeQuoteId);
  await page.locator('#pub-photo').setInputFiles({name:'car.png',mimeType:'image/png',buffer:png});
  await page.getByText('Фото готово и будет добавлено при публикации поездки.').waitFor();
  assert.equal(await page.locator('#pub-photo-preview').count(),1,'car preview must display after selection');

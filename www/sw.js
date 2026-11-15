@@ -1,12 +1,13 @@
 /* Network-first shell. Bump CACHE_NAME whenever the shell release changes.
    API traffic is never intercepted; the new worker activates immediately. */
 const CACHE_PREFIX = 'po-puti-shell-';
-const CACHE_NAME = CACHE_PREFIX + 'route-v4';
+const CACHE_NAME = CACHE_PREFIX + 'features-v5';
 const NETWORK_TIMEOUT_MS = 15000;
 const SHELL = new Map([
   ['/index.html', ['text/html']],
   ['/offline.html', ['text/html']],
   ['/styles.css', ['text/css']],
+  ['/features-v5.js', ['text/javascript', 'application/javascript']],
   ['/app.js', ['text/javascript', 'application/javascript']],
   ['/manifest.webmanifest', ['application/manifest+json', 'application/json']],
   ['/icons/icon-192.png', ['image/png']],
@@ -48,7 +49,7 @@ async function fetchComplete(request, path) {
 self.addEventListener('install', event => {
   event.waitUntil((async () => {
     const cache = await caches.open(CACHE_NAME);
-    const required = ['/index.html', '/styles.css', '/app.js', '/offline.html'];
+    const required = ['/index.html', '/styles.css', '/app.js', '/features-v5.js', '/offline.html'];
     for (const path of required) {
       const response = await fetchComplete(new Request(cacheKey(path)), path);
       await cache.put(cacheKey(path), response);

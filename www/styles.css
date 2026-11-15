@@ -17,3 +17,14 @@
 /* Lifecycle/admin share the existing product palette and responsive cards. */
 .lifecycle-panel .actions{flex-wrap:wrap}.lifecycle-panel button{margin-top:8px}.admin-json{white-space:pre-wrap;overflow-wrap:anywhere;max-width:100%;font:inherit;font-size:12px}.admin-summary{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.5fr);gap:10px}.admin-summary dt,.admin-summary dd{margin:0;overflow-wrap:anywhere}.admin-page>.actions{flex-wrap:wrap;margin:14px 0}.admin-page .stack input,.admin-page textarea{max-width:100%}@media(max-width:480px){.admin-summary{grid-template-columns:minmax(0,1fr)}.admin-summary dt{font-weight:600}}
 #route-estimate [role=status]{color:var(--teal);padding:12px 0}#route-estimate .note{line-height:1.6}.trip-status{font-weight:650;margin:12px 0 0;color:var(--navy)}#manual-duration[hidden]{display:none}.admin-record{display:grid;grid-template-columns:minmax(110px,1fr) minmax(0,2fr);gap:8px 14px;white-space:normal;margin:0}.admin-record dt{color:var(--muted);font-size:13px}.admin-record dd{margin:0;overflow-wrap:anywhere}.admin-record .admin-record{display:block;padding:8px;border-left:2px solid var(--teal)}.admin-record .admin-record dt{margin-top:8px}
+/* v5: distinct informational bus cards and independent ad placements. */
+.bus-card {border-left:4px solid #43caba}
+.rasp-credit {font-size:inherit;color:inherit}
+.rasp-credit a {color:inherit}
+.ad-slot {max-width:100%;margin:16px 0;overflow:hidden}
+.ad-slot[hidden] {display:none}
+.ad-slot>span {display:block;font-size:12px;color:#667085;margin-bottom:6px}
+.weekdays {display:flex;flex-wrap:wrap;gap:12px;border:0;padding:12px 0}
+.weekdays label {display:flex;gap:4px;align-items:center}
+.weekdays input {width:auto}
+.privacy-ads {margin:20px 0;font-size:14px}
