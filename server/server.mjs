@@ -112,7 +112,7 @@ function checkRate(ip){
  r.count++;limit.set(ip,r);
  if(r.count>55)throw jsonError('Слишком много попыток. Повторите позже.',429);
 }
-function notify(recipient,title,message,rideId=''){const id=uid();run('INSERT INTO notifications(id,recipient_id,title,message,ride_id,read,created,target_path) VALUES(?,?,?,?,?,?,?,?)',id,recipient,title,message,rideId,0,now(),rideId?'/ride/'+rideId:'/notifications');life.enqueueExisting(id)}
+function notify(recipient,title,message,rideId='',kind='legacy',targetPath=''){const id=uid();run('INSERT INTO notifications(id,recipient_id,title,message,ride_id,read,created,target_path,kind) VALUES(?,?,?,?,?,?,?,?,?)',id,recipient,title,message,rideId,0,now(),targetPath||(rideId?'/ride/'+rideId:'/notifications'),kind);life.enqueueExisting(id)}
 function transaction(fn){database.exec('BEGIN IMMEDIATE');try{const val=fn();database.exec('COMMIT');return val}catch(err){database.exec('ROLLBACK');throw err}}
 function getActor(req){const token=requestToken(req);if(!token)return null;return q('SELECT u.* FROM users u INNER JOIN sessions s ON s.user_id=u.id WHERE s.token_hash=? AND s.expires>? AND u.blocked_at IS NULL',sha(token),now())||null;}
 function requireActor(req){const actor=getActor(req);if(!actor)throw jsonError('Необходим вход в аккаунт',401);return actor;}
@@ -223,7 +223,7 @@ function state(actor){
  const messages=rows('SELECT * FROM messages WHERE from_id=? OR to_id=? ORDER BY created DESC LIMIT 1000',actor.id,actor.id).map(m=>({id:m.id,rideId:m.ride_id,fromId:m.from_id,toId:m.to_id,text:m.text,created:m.created}));
  return {decisions:rows("SELECT d.id,d.ride_id rideId,d.report_id reportId,d.decision,d.comment,d.created_at createdAt FROM moderation_decisions d JOIN rides r ON r.id=d.ride_id WHERE r.driver_id=? OR EXISTS(SELECT 1 FROM requests WHERE ride_id=r.id AND user_id=? AND status='accepted') OR EXISTS(SELECT 1 FROM reports WHERE id=d.report_id AND author_id=?) ORDER BY d.created_at DESC LIMIT 100",actor.id,actor.id,actor.id),serverNow:now(),currentUserId:actor.id,users,rides,requests:reqs.filter(r=>r.user_id===actor.id||life.describe(rideById(r.ride_id)).phase==='scheduled').map(r=>({id:r.id,rideId:r.ride_id,userId:r.user_id,status:r.expired_at?'expired':r.status,created:r.created})),notifications,unreadCount:q('SELECT COUNT(*) n FROM notifications WHERE recipient_id=? AND read=0',actor.id).n,reviews:[...reviews.map(r=>({...r,source:'legacy',isAuto:false,isPublished:r.moderationStatus!=='blocked'})),...life.reviewsFor(actor.id,visibleIds)],messages,reports:rows('SELECT id,ride_id rideId,reason,details,status,decision,created FROM reports WHERE author_id=? ORDER BY created DESC LIMIT 100',actor.id),participations:rides.filter(r=>r.driverId===actor.id||reqs.some(q=>q.ride_id===r.id&&q.user_id===actor.id&&q.status==='accepted')).map(r=>life.participation(rideById(r.id),actor.id))};
 }
-function cancelRide(ride,actor,asAdmin=false,reason=''){life.mutable(ride);if(asAdmin&&(!reason||typeof reason!=='string'))throw jsonError('Укажите причину отмены');if(ride.driver_id!==actor.id&&!asAdmin)throw jsonError('Недостаточно прав',403);if(ride.cancelled)throw jsonError('Поездка уже отменена',409);transaction(()=>{if(asAdmin)life.audit(actor,'ride',ride.id,'cancel',{cancelled:false},{cancelled:true},reason);run('UPDATE rides SET cancelled=1 WHERE id=?',ride.id);for(const r of rows("SELECT * FROM requests WHERE ride_id=? AND status IN ('pending','accepted')",ride.id)){run("UPDATE requests SET status='cancelled' WHERE id=?",r.id);notify(r.user_id,'Поездка отменена',`${ride.origin} → ${ride.destination}: поездка отменена`,ride.id)}});return {ok:true};}
+function cancelRide(ride,actor,asAdmin=false,reason=''){life.mutable(ride);if(asAdmin&&(!reason||typeof reason!=='string'))throw jsonError('Укажите причину отмены');if(ride.driver_id!==actor.id&&!asAdmin)throw jsonError('Недостаточно прав',403);if(ride.cancelled)throw jsonError('Поездка уже отменена',409);transaction(()=>{if(asAdmin)life.audit(actor,'ride',ride.id,'cancel',{cancelled:false},{cancelled:true},reason);run('UPDATE rides SET cancelled=1 WHERE id=?',ride.id);for(const r of rows("SELECT * FROM requests WHERE ride_id=? AND status IN ('pending','accepted')",ride.id)){run("UPDATE requests SET status='cancelled' WHERE id=?",r.id);notify(r.user_id,'Поездка отменена',`${ride.origin} → ${ride.destination}: поездка отменена`,ride.id,'ride_cancelled')}});return {ok:true};}
 async function handleApi(req,res,path,data){const method=req.method;
  if(path==='/api/health' && method==='GET')return {ok:q('SELECT 1 AS ok').ok===1,backend:'sqlite',version:'0.2',release:process.env.RELEASE_SHA||'development'};
  if(path==='/api/register' && method==='POST'){
@@ -277,13 +277,13 @@ async function handleApi(req,res,path,data){const method=req.method;
    return transaction(()=>{
    // File writes yield the event loop: another request may have committed this key.
    if(key){const prev=q('SELECT ride_id FROM ride_operations WHERE user_id=? AND client_key=?',actor.id,key);if(prev)return {id:prev.ride_id,repeated:true};}
-   const id=uid();run('INSERT INTO rides(id,driver_id,origin,destination,date,time,seats,price,car,pickup,dropoff,luggage,comment,photo,cancelled,created) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',id,actor.id,from,to,date,time,seats,price,car,clean(data.pickup,150),clean(data.dropoff,150),clean(data.luggage,60),clean(data.comment,550),photo,0,now());life.attachTiming(id,timing);if(key)run('INSERT INTO ride_operations VALUES(?,?,?)',actor.id,key,id);return {id};});
+   if(timing)life.addTiming(data);const id=uid();run('INSERT INTO rides(id,driver_id,origin,destination,date,time,seats,price,car,pickup,dropoff,luggage,comment,photo,cancelled,created) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',id,actor.id,from,to,date,time,seats,price,car,clean(data.pickup,150),clean(data.dropoff,150),clean(data.luggage,60),clean(data.comment,550),photo,0,now());life.attachTiming(id,timing);if(key)run('INSERT INTO ride_operations VALUES(?,?,?)',actor.id,key,id);return {id};});
  }
  if(path==='/api/requests'&&method==='POST'){
    const ride=rideById(clean(data.rideId,100));life.mutable(ride);if(ride.cancelled||ride.driver_id===actor.id)throw jsonError('Нельзя отправить заявку на эту поездку',409);
    return transaction(()=>{if(q('SELECT id FROM requests WHERE ride_id=? AND user_id=?',ride.id,actor.id))throw jsonError('Вы уже отправили заявку на поездку',409);
      const occupied=q("SELECT COUNT(*) n FROM requests WHERE ride_id=? AND status='accepted'",ride.id).n;if(occupied>=ride.seats)throw jsonError('Свободных мест больше нет',409);
-     const id=uid();run('INSERT INTO requests(id,ride_id,user_id,status,created) VALUES(?,?,?,?,?)',id,ride.id,actor.id,'pending',now());notify(ride.driver_id,'Новая заявка',`${actor.name} хочет поехать: ${ride.origin} → ${ride.destination}`,ride.id);return {id};});
+     const id=uid();run('INSERT INTO requests(id,ride_id,user_id,status,created) VALUES(?,?,?,?,?)',id,ride.id,actor.id,'pending',now());notify(ride.driver_id,'Новая заявка',`${actor.name} хочет поехать: ${ride.origin} → ${ride.destination}`,ride.id,'booking_created');return {id};});
  }
  const cancelledRequest=path.match(/^\/api\/requests\/([^/]+)\/cancel$/);
  if(cancelledRequest&&method==='POST'){
@@ -291,7 +291,7 @@ async function handleApi(req,res,path,data){const method=req.method;
   if(request.user_id!==actor.id)throw jsonError('Это не ваша заявка',403);
   const trip=rideById(request.ride_id);life.mutable(trip);
   if(!['pending','accepted'].includes(request.status)||request.expired_at)throw jsonError('Заявка уже закрыта',409);
-  return transaction(()=>{run("UPDATE requests SET status='cancelled' WHERE id=?",request.id);notify(trip.driver_id,'Бронирование отменено','Пассажир отменил заявку до отправления.',trip.id);return {ok:true}});
+  return transaction(()=>{run("UPDATE requests SET status='cancelled' WHERE id=?",request.id);notify(trip.driver_id,'Бронирование отменено','Пассажир отменил заявку до отправления.',trip.id,'booking_cancelled');return {ok:true}});
  }
  let m=path.match(/^\/api\/requests\/([^/]+)\/(accept|reject)$/);
  if(m&&method==='POST'){
@@ -299,14 +299,14 @@ async function handleApi(req,res,path,data){const method=req.method;
    const ride=rideById(reqst.ride_id);life.mutable(ride);if(ride.driver_id!==actor.id)throw jsonError('Вы не владелец поездки',403);
    return transaction(()=>{const fresh=q('SELECT * FROM requests WHERE id=?',m[1]);if(fresh.status!=='pending'||ride.cancelled)throw jsonError('Заявка уже обработана или поездка отменена',409);
      if(m[2]==='accept'&&q("SELECT COUNT(*) n FROM requests WHERE ride_id=? AND status='accepted'",ride.id).n>=ride.seats)throw jsonError('Свободных мест больше нет',409);
-     const status=m[2]==='accept'?'accepted':'rejected';run('UPDATE requests SET status=? WHERE id=?',status,m[1]);notify(fresh.user_id,status==='accepted'?'Заявка подтверждена':'Заявка отклонена',`${ride.origin} → ${ride.destination}: ${status==='accepted'?'водитель принял вашу заявку':'водитель отклонил вашу заявку'}`,ride.id);return {ok:true,status};});
+     const status=m[2]==='accept'?'accepted':'rejected';run('UPDATE requests SET status=? WHERE id=?',status,m[1]);notify(fresh.user_id,status==='accepted'?'Заявка подтверждена':'Заявка отклонена',`${ride.origin} → ${ride.destination}: ${status==='accepted'?'водитель принял вашу заявку':'водитель отклонил вашу заявку'}`,ride.id,'booking_status');return {ok:true,status};});
  }
  m=path.match(/^\/api\/rides\/([^/]+)\/cancel$/);if(m&&method==='POST')return cancelRide(rideById(m[1]),actor);
  m=path.match(/^\/api\/admin\/rides\/([^/]+)\/cancel$/);if(m&&method==='POST'){requireAdmin(actor);return cancelRide(rideById(m[1]),actor,true,data.reason)}
  m=path.match(/^\/api\/notifications\/([^/]+)\/read$/);if(m&&method==='POST'){run('UPDATE notifications SET read=1,read_at=COALESCE(read_at,?) WHERE id=? AND recipient_id=?',now(),m[1],actor.id);return {ok:true}}
  if(path==='/api/messages'&&method==='POST'){
    const rideId=clean(data.rideId,100),toId=clean(data.toId,100),txt=clean(data.text,1200);if(!txt||!confirmed(rideId,actor.id,toId))throw jsonError('Чат доступен только участникам подтверждённой поездки',403);
-   const id=uid();run('INSERT INTO messages VALUES(?,?,?,?,?,?)',id,rideId,actor.id,toId,txt,now());notify(toId,'Новое сообщение',txt.slice(0,120),rideId);return {id};
+   const id=uid();run('INSERT INTO messages VALUES(?,?,?,?,?,?)',id,rideId,actor.id,toId,txt,now());notify(toId,'Новое сообщение',txt.slice(0,120),rideId,'chat_message','/chat/'+rideId+'/'+actor.id);return {id};
  }
  if((path==='/api/reports'||path==='/api/complaints')&&method==='POST'){
   const trip=rideById(clean(data.rideId,100)),reason=clean(data.reason,100),details=clean(data.details,500),category=data.category==='ride_fact'?'ride_fact':'general';

@@ -389,7 +389,7 @@ document.addEventListener('change',async ev=>{
 // Shared PWA/Capacitor UI. Every eligibility/status/deadline below comes from API.
 const OUTCOME_LABELS={pending_confirmation:'Ожидает подтверждения',completed:'Состоялась',not_held:'Не состоялась',disputed:'Спорная',unverified:'Не подтверждена',cancelled:'Отменена'};
 let v3Admin={section:'summary',page:1,q:'',status:'',from:'',to:'',data:null,key:'',loading:false,error:''};
-let pendingPushPath=/^#\/(?:ride\/|reviews\/|notifications|complaints|admin)/.test(location.hash||'')?(location.hash||'').slice(1):null;
+let pendingPushPath=/^#\/(?:chat\/|ride\/|reviews\/|notifications|complaints|admin)/.test(location.hash||'')?(location.hash||'').slice(1):null;
 let pushConfig=null,pushLoading=false,pushMessage='',nativePush=null,nativePushBound=false;
 function participationFor(id){return (db.participations||[]).find(p=>p.rideId===id)}
 function tripTime(value,offset='+00:00'){const sign=offset[0]==='-'?-1:1;const parts=offset.slice(1).split(':').map(Number);return new Date(Date.parse(value)+sign*(parts[0]*60+parts[1])*60000).toISOString().slice(0,16).replace('T',' ')+' UTC'+offset}
@@ -415,7 +415,7 @@ function pushWidget(){const permission=typeof Notification!=='undefined'?Notific
 function refreshPushWidget(){const el=$('#push-controls');if(el)el.innerHTML=pushWidget()}
 async function loadPushConfig(){if(pushLoading||pushConfig||!accessToken)return;pushLoading=true;const token=accessToken;try{const result=await api('/push/config');if(token===accessToken)pushConfig=result}catch{if(token===accessToken)pushMessage='Настройки уведомлений сейчас недоступны.'}finally{pushLoading=false;if(token===accessToken)refreshPushWidget()}}
 function pushPanel(){if(!remoteMode)return '';const pending=(db.participations||[]).reduce((n,p)=>n+(p.reviewTargets||[]).filter(t=>t.state==='pending_by_user').length,0);Promise.resolve().then(loadPushConfig);return `<section class="section-card" id="push-controls">${pushWidget()}</section><section class="section-card actions">${pending?`<p class="note">Неотправленных отзывов: ${pending}. Форму можно открыть в «Мои отзывы».</p>`:''}<button class="btn btn-ghost" data-action="nav" data-route="/my-reviews">Мои отзывы</button><button class="btn btn-ghost" data-action="nav" data-route="/complaints">Мои обращения</button></section>`}
-function safePushPath(value){return typeof value==='string'&&/^\/(?:ride\/[a-zA-Z0-9_-]+|reviews\/[a-zA-Z0-9_-]+|notifications|complaints|admin)$/.test(value)?value:'/notifications'}
+function safePushPath(value){return typeof value==='string'&&/^\/(?:chat\/[a-zA-Z0-9_-]+\/[a-zA-Z0-9_-]+|ride\/[a-zA-Z0-9_-]+|reviews\/[a-zA-Z0-9_-]+|notifications|complaints|admin)$/.test(value)?value:'/notifications'}
 async function bindNativePush(){if(nativePushBound||!nativePlatform())return;const plugin=getNativePush();if(!plugin)return;await plugin.addListener('pushNotificationActionPerformed',e=>{pendingPushPath=safePushPath(e.notification?.data?.path);if(accessToken)navigate(pendingPushPath)});await plugin.addListener('pushNotificationReceived',()=>{if(accessToken)refreshRemote({fresh:true})});nativePushBound=true;}
 async function enablePush(){
  const token=accessToken;if(!token)return;const config=pushConfig;if(!config)throw Error('Настройки ещё загружаются');

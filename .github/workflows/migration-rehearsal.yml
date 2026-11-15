@@ -2,7 +2,7 @@ name: Private migration rehearsal
 on:
   push:
     branches: [feature/unified-trip-lifecycle-v3]
-    paths: [.github/workflows/migration-rehearsal.yml]
+    paths: [.github/workflows/migration-rehearsal.yml, server/**, scripts/validate-lifecycle-copy.mjs, deploy/validate-lifecycle-copy.sh]
   workflow_dispatch:
 permissions:
   contents: read

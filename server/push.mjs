@@ -76,7 +76,7 @@ export async function processPush(l,transport,{limit=25,shouldStop=()=>false}={}
   try{await transport.deliver(sub,payload);run("UPDATE push_outbox SET status='sent',delivered_at=?,last_error='' WHERE id=? AND status='sending'",clock(),job.id)}
   catch(error){
    const status=Number(error.statusCode||503),invalid=[404,410].includes(status),terminal=invalid||error.retryable===false||job.attempts>=5;
-   run('UPDATE push_outbox SET status=?,next_attempt_at=?,last_error=? WHERE id=?',terminal?'failed':'retry',clock()+Math.min(32,2**job.attempts)*60000,'delivery_status_'+status,job.id);
+   run('UPDATE push_outbox SET status=?,next_attempt_at=?,last_error=? WHERE id=? AND status=\'sending\'',terminal?'failed':'retry',clock()+Math.min(32,2**job.attempts)*60000,'delivery_status_'+status,job.id);
    if(invalid)run('UPDATE push_subscriptions SET active=0 WHERE id=?',sub.id);
   }
  }
