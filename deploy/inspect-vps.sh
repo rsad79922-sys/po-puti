@@ -67,3 +67,12 @@ printf 'FREE_MAP_DOWNLOAD_CONNECTIVITY\n'
 for tls in 1.2 1.3; do
  curl -4 --noproxy '*' --tlsv"$tls" --tls-max "$tls" --http1.1 --fail --silent --show-error --connect-timeout 8 --max-time 20 -o /dev/null -w "tls=$tls http=%{http_code} bytes=%{size_download} total=%{time_total}\n" https://brouter.de/brouter/segments4/ || true
 done
+
+printf "GEOCODER_SAFE_DIAGNOSIS\n"
+node --input-type=module <<'GEO_DIAG'
+import {readFileSync} from 'node:fs';import {parseEnv} from 'node:util';
+let env={};try{env=parseEnv(readFileSync('/etc/po-puti/routing.env','utf8'))}catch{}
+console.log('GEOCODER_SETTINGS',JSON.stringify({provider:env.GEOCODING_PROVIDER||null,keyPresent:!!env.GEOCODING_API_KEY,router:env.ROUTING_PROVIDER||null}));
+if(env.GEOCODING_API_KEY){const url=new URL(env.GEOCODING_URL||'https://geocode-maps.yandex.ru/v1');url.searchParams.set('apikey',env.GEOCODING_API_KEY);url.searchParams.set('geocode','Москва, Тверская улица, 1');url.searchParams.set('format','json');url.searchParams.set('lang','ru_RU');url.searchParams.set('results','5');try{const response=await fetch(url,{redirect:'error',signal:AbortSignal.timeout(10000)});let data;try{data=await response.json()}catch{}console.log('GEOCODER_UPSTREAM',JSON.stringify({http:response.status,matches:data?.response?.GeoObjectCollection?.featureMember?.length??null,errorCode:data?.statusCode??null}));}catch(e){console.log('GEOCODER_UPSTREAM',JSON.stringify({error:e.name,networkCode:e.cause?.code||null}))}}
+
+GEO_DIAG
