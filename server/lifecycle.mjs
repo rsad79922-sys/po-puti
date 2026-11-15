@@ -127,7 +127,9 @@ export function lifecycle(db,{clock=Date.now,pushAvailable=()=>({web:false,andro
   if(!r.estimated_arrival_at||r.cancelled||clock()<r.estimated_arrival_at+HOUR||clock()>=r.estimated_arrival_at+HOUR+14*DAY)throw fail('Подтверждение сейчас недоступно',409);
   if(!['yes','no'].includes(data.answer))throw fail('Выберите «Да» или «Нет»');
   const reason=typeof data.reason==='string'?data.reason.trim():'';if(reason.length>500||data.answer==='no'&&!reason)throw fail('Укажите причину ответа «Нет»');
+  const opposite=get('SELECT user_id FROM ride_confirmations WHERE ride_id=? AND answer<>?',r.id,data.answer);
   run('INSERT INTO ride_confirmations VALUES(?,?,?,?,?)',r.id,actor.id,data.answer,clock(),reason);
+  if(r.outcome_override&&opposite)run('UPDATE rides SET outcome_override=NULL WHERE id=?',r.id); // New contradictory evidence reopens an already moderated outcome.
   tickTransaction();return {participation:participation(ride(r.id),actor.id),openReview:data.answer==='yes'};
  })}
  function addTiming(data){
