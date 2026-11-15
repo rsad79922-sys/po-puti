@@ -95,7 +95,7 @@ function checkRate(ip){
  r.count++;limit.set(ip,r);
  if(r.count>55)throw jsonError('Слишком много попыток. Повторите позже.',429);
 }
-function notify(recipient,title,message,rideId=''){run('INSERT INTO notifications VALUES(?,?,?,?,?,?,?)',uid(),recipient,title,message,rideId,0,now());}
+function notify(recipient,title,message,rideId=''){run('INSERT INTO notifications(id,recipient_id,title,message,ride_id,read,created) VALUES(?,?,?,?,?,?,?)',uid(),recipient,title,message,rideId,0,now());}
 function transaction(fn){database.exec('BEGIN IMMEDIATE');try{const val=fn();database.exec('COMMIT');return val}catch(err){database.exec('ROLLBACK');throw err}}
 function getActor(req){const token=requestToken(req);if(!token)return null;return q('SELECT u.* FROM users u INNER JOIN sessions s ON s.user_id=u.id WHERE s.token_hash=? AND s.expires>?',sha(token),now())||null;}
 function requireActor(req){const actor=getActor(req);if(!actor)throw jsonError('Необходим вход в аккаунт',401);return actor;}
@@ -244,13 +244,13 @@ async function handleApi(req,res,path,data){const method=req.method;
    return transaction(()=>{
    // File writes yield the event loop: another request may have committed this key.
    if(key){const prev=q('SELECT ride_id FROM ride_operations WHERE user_id=? AND client_key=?',actor.id,key);if(prev)return {id:prev.ride_id,repeated:true};}
-   const id=uid();run('INSERT INTO rides VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',id,actor.id,from,to,date,time,seats,price,car,clean(data.pickup,150),clean(data.dropoff,150),clean(data.luggage,60),clean(data.comment,550),photo,0,now());if(key)run('INSERT INTO ride_operations VALUES(?,?,?)',actor.id,key,id);return {id};});
+   const id=uid();run('INSERT INTO rides(id,driver_id,origin,destination,date,time,seats,price,car,pickup,dropoff,luggage,comment,photo,cancelled,created) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',id,actor.id,from,to,date,time,seats,price,car,clean(data.pickup,150),clean(data.dropoff,150),clean(data.luggage,60),clean(data.comment,550),photo,0,now());if(key)run('INSERT INTO ride_operations VALUES(?,?,?)',actor.id,key,id);return {id};});
  }
  if(path==='/api/requests'&&method==='POST'){
    const ride=rideById(clean(data.rideId,100));if(ride.cancelled||ride.driver_id===actor.id||ride.date<isoDay())throw jsonError('Нельзя отправить заявку на эту поездку',409);
    return transaction(()=>{if(q('SELECT id FROM requests WHERE ride_id=? AND user_id=?',ride.id,actor.id))throw jsonError('Вы уже отправили заявку на поездку',409);
      const occupied=q("SELECT COUNT(*) n FROM requests WHERE ride_id=? AND status='accepted'",ride.id).n;if(occupied>=ride.seats)throw jsonError('Свободных мест больше нет',409);
-     const id=uid();run('INSERT INTO requests VALUES(?,?,?,?,?)',id,ride.id,actor.id,'pending',now());notify(ride.driver_id,'Новая заявка',`${actor.name} хочет поехать: ${ride.origin} → ${ride.destination}`,ride.id);return {id};});
+     const id=uid();run('INSERT INTO requests(id,ride_id,user_id,status,created) VALUES(?,?,?,?,?)',id,ride.id,actor.id,'pending',now());notify(ride.driver_id,'Новая заявка',`${actor.name} хочет поехать: ${ride.origin} → ${ride.destination}`,ride.id);return {id};});
  }
  let m=path.match(/^\/api\/requests\/([^/]+)\/(accept|reject)$/);
  if(m&&method==='POST'){
@@ -272,7 +272,7 @@ async function handleApi(req,res,path,data){const method=req.method;
    try{run('INSERT INTO reviews VALUES(?,?,?,?,?,?,?)',uid(),ride.id,ride.driver_id,actor.id,score,txt,now())}catch{throw jsonError('Отзыв на эту поездку уже оставлен',409)}return {ok:true};
  }
  if(path==='/api/reports'&&method==='POST'){
-   const ride=rideById(clean(data.rideId,100)),reason=clean(data.reason,100),details=clean(data.details,500);if(!reason)throw jsonError('Выберите причину жалобы');run('INSERT INTO reports VALUES(?,?,?,?,?,?)',uid(),ride.id,actor.id,reason,details,now());return {ok:true};
+   const ride=rideById(clean(data.rideId,100)),reason=clean(data.reason,100),details=clean(data.details,500);if(!reason)throw jsonError('Выберите причину жалобы');run('INSERT INTO reports(id,ride_id,author_id,reason,details,created) VALUES(?,?,?,?,?,?)',uid(),ride.id,actor.id,reason,details,now());return {ok:true};
  }
  if(path==='/api/admin/overview'&&method==='GET'){
    requireAdmin(actor);return {users:rows('SELECT id,username,name,role FROM users ORDER BY created DESC'),rides:rows('SELECT * FROM rides ORDER BY created DESC LIMIT 100').map(publicRide),requests:rows('SELECT id,ride_id,user_id,status FROM requests ORDER BY created DESC LIMIT 100'),reports:rows('SELECT id,ride_id rideId,reason,details,created FROM reports ORDER BY created DESC LIMIT 100')};
