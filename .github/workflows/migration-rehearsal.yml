@@ -1,5 +1,8 @@
 name: Private migration rehearsal
 on:
+  push:
+    branches: [feature/unified-trip-lifecycle-v3]
+    paths: [.github/workflows/migration-rehearsal.yml]
   workflow_dispatch:
 permissions:
   contents: read
