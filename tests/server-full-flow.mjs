@@ -38,6 +38,10 @@ try{
    await new Promise(resolve=>setTimeout(resolve,100));
  }
  assert.ok(live,'Server failed: '+serverOutput);
+ // A rollback backend must tolerate additive columns without dropping live data.
+ const evolved=new DatabaseSync(join(temp,'po-puti.sqlite'));
+ for(const table of ['rides','requests','notifications','reports'])evolved.exec('ALTER TABLE '+table+' ADD COLUMN future_extension TEXT');
+ evolved.close();
  const suffix=crypto.randomBytes(6).toString('hex');
  const driver=await ok('/register','POST',{username:'drv_'+suffix,password:'correct-horse-battery-staple'});
  const passenger=await ok('/register','POST',{username:'psg_'+suffix,password:'correct-horse-battery-staple'});
