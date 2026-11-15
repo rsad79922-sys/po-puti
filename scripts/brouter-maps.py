@@ -23,6 +23,17 @@ def parse_index(body):
 def request(url):return urllib.request.urlopen(urllib.request.Request(url,headers={'User-Agent':'PoPuti-self-hosted-BRouter/1 (offline map cache)'}),timeout=45)
 
 def prune(root,keep):
+    # A repeated update of the same snapshot must still retain the prior one.
+    keep=set(keep)
+    if len(keep-{None})<2:
+        previous=[]
+        for directory in root.glob('maps-*'):
+            if directory.name in keep or directory.is_symlink():continue
+            try:
+                metadata=json.loads((directory/'.snapshot.json').read_text())
+                if metadata.get('magic')==MAGIC:previous.append((metadata.get('created',0),directory.name))
+            except (OSError,ValueError):continue
+        if previous:keep.add(max(previous)[1])
     # Only snapshots created here, containing strictly map files and our marker.
     for directory in root.glob('maps-*'):
         if directory.name in keep or directory.is_symlink() or not directory.is_dir():continue

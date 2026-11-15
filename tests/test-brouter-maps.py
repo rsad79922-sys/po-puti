@@ -8,10 +8,12 @@ assert len(records)==1 and records[0]['size']==36588225
 with tempfile.TemporaryDirectory() as tmp:
  root=Path(tmp)
  for name in ['maps-current','maps-previous','maps-old','maps-user-files']:
-  p=root/name;p.mkdir();(p/'.snapshot.json').write_text(json.dumps({'magic':m.MAGIC}));(p/'E35_N55.rd5').write_bytes(b'fixture')
+  p=root/name;p.mkdir();(p/'.snapshot.json').write_text(json.dumps({'magic':m.MAGIC,'created':{'maps-current':4,'maps-previous':3,'maps-old':2,'maps-user-files':1}[name]}));(p/'E35_N55.rd5').write_bytes(b'fixture')
  (root/'maps-user-files'/'private.sqlite').write_bytes(b'preserve')
  m.prune(root,{'maps-current','maps-previous'})
  assert not (root/'maps-old').exists()
  assert (root/'maps-current').is_dir() and (root/'maps-previous').is_dir()
+ m.prune(root,{'maps-current'})
+ assert (root/'maps-previous').is_dir(),'repeated identical updates must retain the prior complete snapshot'
  assert (root/'maps-user-files'/'private.sqlite').read_bytes()==b'preserve'
 print('PASS: bounded Russian map manifest, dateline coverage, current/prior cache retained and foreign files never removed')

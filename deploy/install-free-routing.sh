@@ -16,7 +16,8 @@ available_kb=$(awk '/MemTotal:/{print $2}' /proc/meminfo)
 # No paid API account, token, billing or subscription is used.
 apt-get update
 DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends openjdk-17-jre-headless curl python3 unzip
-if ! id poputi-router >/dev/null 2>&1; then useradd --system --no-create-home --home-dir "$DATA" --shell /usr/sbin/nologin poputi-router; fi
+if ! getent group poputi-router >/dev/null; then groupadd --system poputi-router; fi
+if ! id poputi-router >/dev/null 2>&1; then useradd --system --gid poputi-router --no-create-home --home-dir "$DATA" --shell /usr/sbin/nologin poputi-router; fi
 getent group poputi >/dev/null
 install -d -m 0755 "$ROUTER" "$ROUTER/releases" "$ROUTER/bin"
 printf 'po-puti-free-router-v1\n' > "$ROUTER/.po-puti-managed-router"
