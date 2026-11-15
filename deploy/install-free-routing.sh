@@ -35,7 +35,7 @@ if [[ ! -d "$ROUTER/releases/$VERSION" ]]; then
   find "$ROUTER/releases/$VERSION" -type f -exec chmod 0644 {} +
 fi
 install -m 0755 "$SOURCE/scripts/brouter-maps.py" "$ROUTER/bin/brouter-maps.py"
-python3 "$ROUTER/bin/brouter-maps.py" "$DATA"
+if [[ -n "${1:-}" ]]; then python3 "$ROUTER/bin/brouter-maps.py" --import "$DATA" "$1"; else python3 "$ROUTER/bin/brouter-maps.py" "$DATA"; fi
 # Probe on a separate loopback port before replacing any live router unit/config.
 systemd-run --unit="$stage_unit" --uid=poputi-router --gid=poputi-router --collect \
   -p MemoryMax=2048M -p CPUQuota=100% -p StandardOutput=null \
@@ -55,7 +55,8 @@ systemctl daemon-reload
 systemctl enable --now po-puti-router
 systemctl restart po-puti-router
 python3 "$SOURCE/scripts/probe-brouter.py" http://127.0.0.1:17777
-systemctl enable --now po-puti-router-maps.timer
+systemctl disable --now po-puti-router-maps.timer || true
+# Weekly delivery runs through GitHub Actions because the VPS-to-mirror route is unreliable.
 # Keep any already-configured free geocoder key, but disable external paid routing fallbacks.
 install -d -m 0750 -o root -g poputi /etc/po-puti
 config_backup=$(mktemp -d /var/backups/po-puti-free-routing-XXXXXXXX)
