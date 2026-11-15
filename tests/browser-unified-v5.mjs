@@ -7,7 +7,7 @@ import {roadFixture} from './helpers/road.mjs';
 const road=await roadFixture(5400),app=await isolatedServer({...road.env,APP_ORIGINS:'https://localhost',YANDEX_RASP_API_KEY:'local-fixture-only',RASP_LICENSE_CONFIRMED:'true',RASP_DAILY_LIMIT:'20',RASP_CACHE_SECONDS:'3600',ADS_ENABLED:'true',ADS_TERMS_CONFIRMED:'true'});
 let browser,db;
 try{
- const engine=process.env.BROWSER_ENGINE||'chromium';browser=await(engine==='webkit'?webkit:chromium).launch({headless:true,...(engine==='chromium'?{executablePath:process.env.CHROMIUM_PATH||'/usr/bin/chromium',args:['--no-sandbox']}:{})});
+ const engine=process.env.BROWSER_ENGINE||'chromium';browser=await(engine==='webkit'?webkit:chromium).launch({headless:true,...(engine==='chromium'?{...(process.env.CHROMIUM_PATH?{executablePath:process.env.CHROMIUM_PATH}:{}),args:['--no-sandbox']}:{})});
  db=new DatabaseSync(app.dir+'/po-puti.sqlite');const date=new Date(Date.now()+3*86400000).toISOString().slice(0,10),end=new Date(Date.parse(date)+6*86400000).toISOString().slice(0,10),expiry=Date.now()+3600000;
  for(const [code,title] of [['c100','Нефтекамск'],['c200','Уфа']])db.prepare('INSERT INTO bus_places VALUES(?,?,?,?,?,?,?,?)').run(code,title,'Башкортостан','Asia/Yekaterinburg','settlement',Date.now(),expiry,title.toLowerCase());
  const bus={type:'bus_service',id:'verified-bus-fixture',departureAt:date+'T07:00:00Z',arrivalAt:date+'T10:00:00Z',departureTimeZone:'Asia/Yekaterinburg',destinationTimeZone:'Asia/Yekaterinburg',from:'Нефтекамск',to:'Уфа',carrier:'Тестовый перевозчик',purchase:{url:'',cashier:''},source:'yandex_rasp'};

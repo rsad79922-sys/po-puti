@@ -36,7 +36,8 @@ export function rideSeries(life,router){
   }
   return tx(()=>{
    const repeated=get('SELECT id FROM ride_series WHERE driver_id=? AND client_key=?',actor.id,key);if(repeated)return result(repeated.id,true);
-   const id=randomUUID();const template={from:data.from,to:data.to,seats:data.seats,price:data.price,car:data.car,pickup:data.pickup||'',dropoff:data.dropoff||''};
+   if(get('SELECT blocked_at FROM users WHERE id=?',actor.id)?.blocked_at)throw fail('Аккаунт заблокирован',403);if(get('SELECT COUNT(*) n FROM ride_series WHERE driver_id=? AND created_at>?',actor.id,clock()-day).n>=10)throw fail('Достигнут дневной лимит серий',429);
+   const id=randomUUID();const template={privateRideDeclaration:true,from:data.from,to:data.to,seats:data.seats,price:data.price,car:data.car,pickup:data.pickup||'',dropoff:data.dropoff||''};
    run('INSERT INTO ride_series(id,driver_id,start_date,end_date,weekdays_json,time,time_zone,template_json,created_at,client_key) VALUES(?,?,?,?,?,?,?,?,?,?)',id,actor.id,data.date,data.seriesEnd,JSON.stringify(data.weekdays),data.time,plan.departureTimeZone,JSON.stringify(template),clock(),key);
    for(const date of data.exceptions||[])run('INSERT INTO ride_series_exceptions VALUES(?,?,?)',id,date,'Исключено водителем при создании');
    for(const item of plans)insertRide(item.date,item.plan,id);

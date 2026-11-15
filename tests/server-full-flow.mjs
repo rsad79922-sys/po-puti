@@ -3,6 +3,7 @@
  * Covers two synchronized clients plus an unrelated third account.
  */
 import assert from 'node:assert/strict';
+import sharp from 'sharp';
 import {spawn} from 'node:child_process';
 import {mkdtemp,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
@@ -78,7 +79,7 @@ try{
  assert.equal(impossibleDate.status,400,'invalid calendar date was accepted');
  const impossibleTime=await request('/rides','POST',{...rideBody,time:'29:77'},driver.token);
  assert.equal(impossibleTime.status,400,'invalid departure time was accepted');
- const photo='data:image/jpeg;base64,'+Buffer.from([255,216,255,224,0,16]).toString('base64');
+ const photo='data:image/jpeg;base64,'+(await sharp({create:{width:2,height:2,channels:3,background:'#43caba'}}).jpeg().toBuffer()).toString('base64');
  const parallelBody={...rideBody,clientKey:'parallel_'+suffix,photo};
  const parallel=await Promise.all(Array.from({length:6},()=>request('/rides','POST',parallelBody,driver.token)));
  assert(parallel.every(r=>r.status===200),'concurrent idempotent uploads returned an error: '+JSON.stringify(parallel));

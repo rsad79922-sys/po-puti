@@ -9,7 +9,7 @@ export function safeTicketUrl(value){try{const u=new URL(value);return u.protoco
 export function timetables(db,{env=process.env,clock=Date.now,fetcher=fetch}={}){
  const get=(s,...a)=>db.prepare(s).get(...a),all=(s,...a)=>db.prepare(s).all(...a),run=(s,...a)=>db.prepare(s).run(...a);
  const configured=()=>!!env.YANDEX_RASP_API_KEY&&env.RASP_LICENSE_CONFIRMED==='true'&&Number(env.RASP_DAILY_LIMIT)>0&&Number(env.RASP_CACHE_SECONDS)>0;
- const flights=new Map();let catalogPromise=null,cooldown=0,active=0;
+ const flights=new Map();let catalogPromise=null,copyrightPromise=null,cooldown=0,active=0;
  const ttl=()=>Math.min(Number(env.RASP_CACHE_SECONDS)*1000,day);
  const status=()=>({configured:configured(),source:'yandex_rasp',dailyLimit:Number(env.RASP_DAILY_LIMIT)||null,cacheSeconds:Number(env.RASP_CACHE_SECONDS)||null});
  async function request(resource,params={},maxBytes=4*1024*1024){
@@ -56,6 +56,15 @@ export function timetables(db,{env=process.env,clock=Date.now,fetcher=fetch}={})
   if(code(value))return get('SELECT * FROM bus_places WHERE code=? AND expires_at>?',value,clock());
   const items=all('SELECT * FROM bus_places WHERE search_title=? AND expires_at>? AND kind=\'settlement\' LIMIT 2',text(value).toLocaleLowerCase('ru'),clock());return items.length===1?items[0]:null;
  }
+ async function copyright(){
+  const old=get("SELECT value_json FROM external_cache WHERE cache_key='rasp:copyright' AND expires_at>?",clock());if(old)return JSON.parse(old.value_json);
+  if(!copyrightPromise)copyrightPromise=(async()=>{const raw=await request('copyright'),html=raw.copyright?.logo_vm;
+   const src=typeof html==='string'?html.match(/\bsrc\s*=\s*["']([^"']+)["']/i)?.[1]:null;
+   if(!src)throw Error('copyright_missing');const url=new URL(src.startsWith('//')?'https:'+src:src);
+   if(url.protocol!=='https:'||url.username||url.password||!['yandex.st','yastatic.net','yandex.ru','rasp.yandex.ru'].includes(url.hostname)||!url.pathname.startsWith('/rasp/'))throw Error('copyright_invalid');
+   const value={frameUrl:url.href,text:'Данные предоставлены сервисом Яндекс.Расписания',url:'https://rasp.yandex.ru/'};run("INSERT INTO external_cache VALUES('rasp:copyright',?,?) ON CONFLICT(cache_key) DO UPDATE SET value_json=excluded.value_json,expires_at=excluded.expires_at",JSON.stringify(value),clock()+ttl());return value;
+  })().finally(()=>copyrightPromise=null);return copyrightPromise;
+ }
  async function search(params){
   const from=text(params.from),to=text(params.to),date=text(params.date,10),offset=Number(params.offset||0);
   if(!/^\d{4}-\d{2}-\d{2}$/.test(date)||!Number.isFinite(Date.parse(date))||new Date(date).toISOString().slice(0,10)!==date)throw fail('Выберите дату поиска');
@@ -66,7 +75,7 @@ export function timetables(db,{env=process.env,clock=Date.now,fetcher=fetch}={})
   const cached=get('SELECT value_json FROM external_cache WHERE cache_key=? AND expires_at>?',cacheKey,clock());if(cached)return {...JSON.parse(cached.value_json),cached:true};
   if(flights.has(cacheKey))return flights.get(cacheKey);
   const pending=(async()=>{try{
-   const raw=await request('search',{from:a.code,to:b.code,date,transport_types:'bus',transfers:false,result_timezone:'UTC',limit:50,offset});
+   const [raw,credit]=await Promise.all([request('search',{from:a.code,to:b.code,date,transport_types:'bus',transfers:false,result_timezone:'UTC',limit:50,offset}),copyright()]);
    if(!Array.isArray(raw.segments))throw Error('invalid_schema');
    const items=[];
    for(const s of raw.segments){
@@ -77,7 +86,7 @@ export function timetables(db,{env=process.env,clock=Date.now,fetcher=fetch}={})
     const purchase=get('SELECT * FROM bus_purchase_info WHERE thread_uid=? AND service_date=? AND from_code=? AND to_code=? AND valid_until>?',text(s.thread.uid),date,s.from.code,s.to.code,clock());
     items.push({type:'bus_service',id:createHash('sha256').update(JSON.stringify([s.thread.uid,s.from.code,s.to.code,s.departure])).digest('hex'),departureAt:new Date(dep).toISOString(),arrivalAt:new Date(arr).toISOString(),departureTimeZone:a.time_zone,destinationTimeZone:destZone,from:text(s.from.title),to:text(s.to.title),carrier:text(s.thread.carrier?.title),purchase:purchase?{url:safeTicketUrl(purchase.url),cashier:text(purchase.cashier,500)}:{url:'',cashier:''},source:'yandex_rasp'});
    }
-   const total=Number(raw.pagination?.total)||items.length;const out={items,status:items.length?'ok':'empty',nextOffset:offset+50<total?offset+50:null,attribution:'Данные предоставлены сервисом Яндекс.Расписания',attributionUrl:'https://rasp.yandex.ru/'};
+   const total=Number(raw.pagination?.total)||items.length;const out={items,status:items.length?'ok':'empty',nextOffset:offset+50<total?offset+50:null,copyright:credit,attribution:credit.text,attributionUrl:credit.url};
    run('INSERT INTO external_cache VALUES(?,?,?) ON CONFLICT(cache_key) DO UPDATE SET value_json=excluded.value_json,expires_at=excluded.expires_at',cacheKey,JSON.stringify(out),clock()+ttl());return out;
   }catch(e){return {items:[],status:e.code==='quota_exceeded'?'quota_exceeded':'unavailable'}}})();
   flights.set(cacheKey,pending);try{return await pending}finally{flights.delete(cacheKey)}

@@ -4,8 +4,10 @@ await copyFile('native/android/PoPutiFeaturesPlugin.java',folder+'/PoPutiFeature
 await writeFile(folder+'/MainActivity.java',`package ru.poputi.app;
 import android.os.Bundle;
 import com.getcapacitor.BridgeActivity;
+import com.getcapacitor.PluginHandle;
+import androidx.activity.OnBackPressedCallback;
 public class MainActivity extends BridgeActivity {
- @Override public void onCreate(Bundle savedInstanceState){registerPlugin(PoPutiFeaturesPlugin.class);super.onCreate(savedInstanceState);}
+ @Override public void onCreate(Bundle savedInstanceState){registerPlugin(PoPutiFeaturesPlugin.class);super.onCreate(savedInstanceState);getOnBackPressedDispatcher().addCallback(this,new OnBackPressedCallback(true){@Override public void handleOnBackPressed(){PluginHandle handle=getBridge().getPlugin("PoPutiFeatures");if(handle!=null&&((PoPutiFeaturesPlugin)handle.getInstance()).handleNativeBack())return;setEnabled(false);getOnBackPressedDispatcher().onBackPressed();setEnabled(true);}});}
 }
 `);
 const manifest='android/app/src/main/AndroidManifest.xml';let xml=await readFile(manifest,'utf8');xml=xml.replace('android:allowBackup="true"','android:allowBackup="false"');if(!xml.includes('AUTOMATIC_SDK_INITIALIZATION'))xml=xml.replace('<application','<uses-permission android:name="android.permission.POST_NOTIFICATIONS" />\n    <application').replace('</application>','<meta-data android:name="com.yandex.mobile.ads.AUTOMATIC_SDK_INITIALIZATION" android:value="false" />\n    </application>');if(!xml.includes('android:usesCleartextTraffic='))xml=xml.replace('android:allowBackup="false"','android:allowBackup="false" android:usesCleartextTraffic="false"');await writeFile(manifest,xml);

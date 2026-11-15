@@ -12,6 +12,7 @@ import { fileURLToPath } from 'node:url';
 import crypto from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import {migrateLifecycle,lifecycle} from './lifecycle.mjs';
+import {normalizePhoto} from './media.mjs';
 import {migrateFeatures} from './migrations-v5.mjs';
 import {rideSeries} from './ride-series.mjs';
 import {safeTicketUrl,timetables} from './timetables.mjs';
@@ -149,14 +150,15 @@ function checkedPhoto(value, maxBytes){
 async function storePhoto(value,maxBytes,ownerId){
  if(!value)return '';
  if(typeof value==='string' && /^\/uploads\/[a-f0-9]{32}\.(?:jpg|png|webp)$/.test(value)){if(ownerId&&!q('SELECT 1 FROM media_files WHERE url=? AND owner_id=?',value,ownerId)&&!q('SELECT 1 FROM users WHERE id=? AND photo=?',ownerId,value)&&!q('SELECT 1 FROM rides WHERE driver_id=? AND photo=?',ownerId,value))throw jsonError('Это не ваше фото',403);return value;}
- const data=checkedPhoto(value,maxBytes);
+ let data=checkedPhoto(value,maxBytes);
+ if(ownerId&&data){const bytes=await normalizePhoto(Buffer.from(data.split(',')[1],'base64'),maxBytes);data='data:image/jpeg;base64,'+bytes.toString('base64');}
  if(!data)return '';
  const match=data.match(/^data:image\/(jpeg|png|webp);base64,/);
  const ext=match[1]==='jpeg'?'jpg':match[1];
  const digest=sha(Buffer.from(data.split(',')[1],'base64'));
  if(ownerId){const old=q('SELECT url FROM media_files WHERE owner_id=? AND sha256=?',ownerId,digest);if(old)return old.url;}
- const filename=crypto.randomBytes(16).toString('hex')+'.'+ext;
- await writeFile(join(UPLOADS,filename),Buffer.from(data.split(',')[1],'base64'),{flag:'wx',mode:0o600});
+ const filename=(ownerId?sha(ownerId+':'+digest).slice(0,32):crypto.randomBytes(16).toString('hex'))+'.'+ext;
+ try{await writeFile(join(UPLOADS,filename),Buffer.from(data.split(',')[1],'base64'),{flag:'wx',mode:0o600})}catch(error){if(!ownerId||error.code!=='EEXIST')throw error}
  const url='/uploads/'+filename;if(ownerId){run('INSERT OR IGNORE INTO media_files VALUES(?,?,?,?,?,?)',url,ownerId,digest,'image/'+match[1],Buffer.from(data.split(',')[1],'base64').length,now());return q('SELECT url FROM media_files WHERE owner_id=? AND sha256=?',ownerId,digest).url;}return url;
 }
 async function migrateLegacyPhotos(){
@@ -241,10 +243,10 @@ async function handleApi(req,res,path,data){const method=req.method;
  if(path==='/api/health' && method==='GET')return {ok:q('SELECT 1 AS ok').ok===1,backend:'sqlite',version:'0.2',release:process.env.RELEASE_SHA||'development'};
  if(path==='/api/public-config'&&method==='GET')return {privacy:clientConfig().privacy};
  if(path==='/api/register' && method==='POST'){
-   checkRate(clientIp(req));const uname=clean(data.username,33).toLowerCase();if(!usernameValid(uname)||!passwordValid(data.password))throw jsonError('Логин должен содержать 3–32 символа, пароль — не менее 8');
+   checkRate(clientIp(req));if(data.clientVersion===5&&data.termsAccepted!==true)throw jsonError('Подтвердите согласие с условиями обработки данных');const uname=clean(data.username,33).toLowerCase();if(!usernameValid(uname)||!passwordValid(data.password))throw jsonError('Логин должен содержать 3–32 символа, пароль — не менее 8');
    if(q('SELECT id FROM users WHERE username=?',uname))throw jsonError('Этот логин уже занят',409);
    const id=uid(),salt=crypto.randomBytes(20).toString('hex'),hash=await boundedHash(data.password,salt);try{run('INSERT INTO users(id,username,salt,hash,name,role,created) VALUES(?,?,?,?,?,?,?)',id,uname,salt,hash,uname,'user',now())}catch(error){if(q('SELECT id FROM users WHERE username=?',uname))throw jsonError('Этот логин уже занят',409);throw error}
-   return loggedIn(q('SELECT * FROM users WHERE id=?',id),req,res);
+   if(data.termsAccepted===true)run('INSERT INTO privacy_consents VALUES(?,?,?,?,?)',id,'terms',clientConfig().privacy.policyVersion,1,now());return loggedIn(q('SELECT * FROM users WHERE id=?',id),req,res);
  }
  if(path==='/api/login' && method==='POST'){
    checkRate(clientIp(req));if(!passwordValid(data.password))throw jsonError('Неверный логин или пароль',401);const uname=clean(data.username,33).toLowerCase();const user=q('SELECT * FROM users WHERE username=?',uname);
@@ -313,6 +315,7 @@ async function handleApi(req,res,path,data){const method=req.method;
    const photo=await storePhoto(data.photo,120000,actor.id);
    if(path==='/api/series')return series.create(actor,data,(date,plan,seriesId)=>{const id=uid();run('INSERT INTO rides(id,driver_id,origin,destination,date,time,seats,price,car,pickup,dropoff,luggage,comment,photo,cancelled,created,series_id,service_date) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,?,?)',id,actor.id,from,to,date,time,seats,price,car,clean(data.pickup,150),clean(data.dropoff,150),clean(data.luggage,60),clean(data.comment,550),photo,now(),seriesId,date);roadRouter.attach(id,actor,plan);return id});
    return transaction(()=>{
+   if(q('SELECT blocked_at FROM users WHERE id=?',actor.id)?.blocked_at)throw jsonError('Аккаунт заблокирован',403);
    // File writes yield the event loop: another request may have committed this key.
    if(key){const prev=q('SELECT ride_id FROM ride_operations WHERE user_id=? AND client_key=?',actor.id,key);if(prev)return {id:prev.ride_id,repeated:true};}
    if(timing)life.addTiming(data);if(routePlan)roadRouter.prepare(actor,data);const id=uid();run('INSERT INTO rides(id,driver_id,origin,destination,date,time,seats,price,car,pickup,dropoff,luggage,comment,photo,cancelled,created) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',id,actor.id,from,to,date,time,seats,price,car,clean(data.pickup,150),clean(data.dropoff,150),clean(data.luggage,60),clean(data.comment,550),photo,0,now());life.attachTiming(id,timing);roadRouter.attach(id,actor,routePlan);if(key)run('INSERT INTO ride_operations VALUES(?,?,?)',actor.id,key,id);return {id};});
@@ -388,7 +391,8 @@ async function serveStatic(req,res,pathname){
  if(file===join(WEB,'index.html')){
   const inline=body.toString('utf8').match(/<script>([\s\S]*?)<\/script>/)?.[1];
   const hash=crypto.createHash('sha256').update(inline||'').digest('base64');
-  res.setHeader('content-security-policy',"default-src 'self'; script-src 'self' 'sha256-"+hash+"'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; frame-src https://yandex.ru; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'");
+  const adOrigins=process.env.ADS_ENABLED==='true'&&process.env.ADS_TERMS_CONFIRMED==='true'?String(process.env.ADS_WEB_CSP_ORIGINS||'').split(',').map(s=>s.trim()).filter(s=>{try{const u=new URL(s);return !s.includes('*')&&u.protocol==='https:'&&u.origin===s&&!u.username&&!u.password}catch{return false}}).join(' '):'';
+  res.setHeader('content-security-policy',"default-src 'self'; script-src 'self' 'sha256-"+hash+"' "+adOrigins+"; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: "+adOrigins+"; connect-src 'self' "+adOrigins+"; frame-src https://yandex.ru https://yandex.st https://yastatic.net "+adOrigins+"; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'");
  }
  res.writeHead(200,{'content-type':mime[extname(file)]||'application/octet-stream','x-content-type-options':'nosniff','cache-control':extname(file)==='.html'?'no-store':'no-cache','content-length':body.length});
  res.end(req.method==='HEAD'?undefined:body);

@@ -5,7 +5,7 @@ import {randomUUID} from 'node:crypto';
 
 // Additive only: existing accounts, reviews, trips and files are never removed.
 export async function migrateFeatures(db,dir){
- if(db.prepare("SELECT 1 FROM sqlite_master WHERE name='features_schema'").get())return;
+ if(db.prepare("SELECT 1 FROM sqlite_master WHERE name='features_schema'").get()){if(db.prepare('SELECT MAX(version) version FROM features_schema').get().version!==5)throw Error('Unsupported feature schema');return;}
  const folder=join(dir,'migration-backups');await mkdir(folder,{recursive:true,mode:0o700});
  const path=join(folder,'before-features-v5-'+randomUUID()+'.sqlite');await backup(db,path);await chmod(path,0o600);
  const copy=new DatabaseSync(path,{readOnly:true});try{if(copy.prepare('PRAGMA integrity_check').get().integrity_check!=='ok')throw Error('Feature backup integrity failed')}finally{copy.close()}

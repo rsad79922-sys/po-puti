@@ -56,7 +56,7 @@ public class PoPutiFeaturesPlugin extends Plugin {
  private void search(){JSObject q=new JSObject();q.put("from",from.getText().toString().trim());q.put("to",to.getText().toString().trim());q.put("date",date.getText().toString().trim());q.put("filter",filter);emit("search",q);}
  private void attach(ViewGroup parent,View view){if(view.getParent()!=null)((ViewGroup)view.getParent()).removeView(view);parent.addView(view);}
  private void createRoot(){
-  root=column();root.setFitsSystemWindows(true);root.setBackgroundColor(Color.rgb(246,248,252));root.setPadding(dp(16),dp(16),dp(16),dp(12));
+  root=column();root.setTag("po-puti-native-search");root.setFitsSystemWindows(true);root.setBackgroundColor(Color.rgb(246,248,252));root.setPadding(dp(16),dp(16),dp(16),dp(12));
   root.addView(label("По пути · Поиск",23));from=input("Откуда");to=input("Куда");date=input("Дата: ГГГГ-ММ-ДД");
   root.addView(from);root.addView(to);root.addView(date);root.addView(button("Найти поездку",this::search));
   topAd=column();root.addView(topAd);
@@ -83,7 +83,8 @@ public class PoPutiFeaturesPlugin extends Plugin {
  }
  private String time(String at,String zone){try{return DateTimeFormatter.ofPattern("dd.MM HH:mm").format(Instant.parse(at).atZone(ZoneId.of(zone)));}catch(Exception e){return "Время не указано";}}
  private void addAd(LinearLayout parent,String name,JSObject data){
-  JSONObject cfg=data.optJSONObject("ads");if(cfg==null||!cfg.optBoolean("enabled")||!data.optBoolean("consent")){destroyAds();return;}
+  JSONObject cfg=data.optJSONObject("ads");if(cfg==null||!cfg.optBoolean("enabled")||!data.optBoolean("consent")){if(adsReady)YandexAds.setUserConsent(false);destroyAds();return;}
+  YandexAds.setUserConsent(true);
   String id="";JSONArray slots=cfg.optJSONArray("android");if(slots!=null)for(int i=0;i<slots.length();i++){JSONObject slot=slots.optJSONObject(i);if(name.equals(slot.optString("name")))id=slot.optString("id");}
   if(cfg.optBoolean("test",true))id="demo-banner-yandex";if(id.isEmpty())return;
   if(!adsReady){if(!adsStarting){adsStarting=true;YandexAds.setUserConsent(true);YandexAds.setLocationTracking(false);YandexAds.setAppAdAnalyticsReporting(false);YandexAds.initialize(getContext(),()->getActivity().runOnUiThread(()->{adsReady=true;adsStarting=false;if(root!=null&&lastPayload!=null)render(lastPayload);}));}return;}
@@ -93,6 +94,7 @@ public class PoPutiFeaturesPlugin extends Plugin {
  private void openUrl(String value){try{Uri uri=Uri.parse(value);if(!"https".equals(uri.getScheme())||uri.getHost()==null||uri.getUserInfo()!=null)throw new IllegalArgumentException();getActivity().startActivity(new Intent(Intent.ACTION_VIEW,uri).addCategory(Intent.CATEGORY_BROWSABLE));}catch(Exception e){Toast.makeText(getContext(),"Не удалось открыть ссылку",Toast.LENGTH_SHORT).show();}}
  @PluginMethod public void openExternal(PluginCall call){getActivity().runOnUiThread(()->{openUrl(call.getString("url",""));call.resolve();});}
  private void close(){destroyAds();if(root!=null){if(root.getParent()!=null)((ViewGroup)root.getParent()).removeView(root);root=null;}}
+ public boolean handleNativeBack(){if(root==null)return false;close();emit("closeSearch",new JSObject());return true;}
  @PluginMethod public void closeSearch(PluginCall call){getActivity().runOnUiThread(()->{close();call.resolve();});}
  @Override protected void handleOnPause(){if(root!=null)root.setVisibility(View.GONE);}
  @Override protected void handleOnResume(){if(root!=null)root.setVisibility(View.VISIBLE);}
