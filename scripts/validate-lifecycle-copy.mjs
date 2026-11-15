@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /** Private, on-VPS migration rehearsal. Source is opened read-only, never exported. */
 import {DatabaseSync,backup} from 'node:sqlite';import {resolve,join} from 'node:path';import {mkdir,chmod,realpath} from 'node:fs/promises';import {createHash} from 'node:crypto';
+import {migrateRouting} from '../server/migrations-v4.mjs';
 import {migrateLifecycle,lifecycle} from '../server/lifecycle.mjs';
 process.umask(0o077);
 const [sourceArg,targetArg]=process.argv.slice(2);if(!sourceArg||!targetArg||!sourceArg.startsWith('/')||!targetArg.startsWith('/'))throw Error('Usage: node scripts/validate-lifecycle-copy.mjs /absolute/live.sqlite /absolute/new-private-directory');
@@ -11,7 +12,7 @@ const db=new DatabaseSync(target);db.exec('PRAGMA foreign_keys=ON;PRAGMA journal
 try{
  const names=['users','rides','requests','messages','reviews','reports','notifications'];
  const before=new Map();for(const name of names){const columns=db.prepare('PRAGMA table_info('+name+')').all().map(c=>c.name);const records=db.prepare('SELECT * FROM '+name).all();before.set(name,{columns,records:new Map(records.map(r=>[r.id,createHash('sha256').update(JSON.stringify(r)).digest('hex')]))})}
- await migrateLifecycle(db,dir);
+ await migrateLifecycle(db,dir);await migrateRouting(db,dir);
  for(const [name,state] of before){for(const [id,digest] of state.records){const row=db.prepare('SELECT '+state.columns.map(c=>'"'+c+'"').join(',')+' FROM '+name+' WHERE id=?').get(id);if(!row||createHash('sha256').update(JSON.stringify(row)).digest('hex')!==digest)throw Error('Existing data changed in migration rehearsal: '+name)}}
  lifecycle(db).tick();
  if(db.prepare('PRAGMA integrity_check').get().integrity_check!=='ok')throw Error('Copy integrity check failed');

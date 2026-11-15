@@ -16,7 +16,7 @@ for(const asset of [...manifest.icons.map(i=>i.src),...Array.from(html.matchAll(
 }
 // dist is disposable output only; no server-data, uploads or environment files.
 await rm('dist',{recursive:true,force:true});await mkdir('dist');
-for(const path of ['www','server','deploy','scripts','tests','docs','README.md','capacitor.config.json','package.json','package-lock.json'])await cp(path,join('dist',path),{recursive:true});
+for(const path of ['www','server','deploy','scripts','tests','docs','README.md','capacitor.config.json','package.json','package-lock.json'])await cp(path,join('dist',path),{recursive:true,filter:source=>!source.split('/').includes('__pycache__')&&!source.endsWith('.pyc')});
 const sums={};
 async function walk(dir){for(const name of (await readdir(dir)).sort()){const path=join(dir,name);if((await stat(path)).isDirectory())await walk(path);else sums[path.slice(5)]=createHash('sha256').update(await readFile(path)).digest('hex')}}
 await walk('dist');await writeFile('dist/checksums.json',JSON.stringify(sums,null,2)+'\n');

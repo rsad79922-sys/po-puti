@@ -1,0 +1,21 @@
+[Unit]
+Description=Update free offline OSM maps for Po Puti BRouter
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /opt/po-puti-brouter/bin/brouter-maps.py /var/lib/po-puti-brouter
+ExecStartPost=/usr/bin/systemctl try-restart po-puti-router
+TimeoutStartSec=45min
+Nice=15
+IOSchedulingClass=idle
+MemoryMax=512M
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/po-puti-brouter
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=po-puti-router-maps

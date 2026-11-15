@@ -8,6 +8,10 @@ printf 'SERVICE_STATES\n'
 systemctl is-active po-puti nginx || true
 printf 'OPERATING_SYSTEM\n'
 sed -nE '/^(PRETTY_NAME|VERSION_ID)=/p' /etc/os-release
+printf 'CAPACITY\n'
+getconf _NPROCESSORS_ONLN
+free -m
+df -m /var/lib/po-puti
 printf 'RUNTIME\n'
 if command -v node >/dev/null; then node --version; else echo NODE_NOT_INSTALLED; fi
 if command -v nginx >/dev/null; then nginx -v 2>&1; else echo NGINX_NOT_INSTALLED; fi
@@ -57,4 +61,9 @@ fi
 printf 'LOCAL_HTTPS\n'
 for port in 443 8443; do
  curl --noproxy '*' -sS --resolve "vputipoputka.ru:$port:127.0.0.1" --connect-timeout 2 --max-time 5 -o /dev/null -w "port=$port http=%{http_code} verify=%{ssl_verify_result}\n" "https://vputipoputka.ru:$port/api/health" || true
+done
+
+printf 'FREE_MAP_DOWNLOAD_CONNECTIVITY\n'
+for tls in 1.2 1.3; do
+ curl -4 --noproxy '*' --tlsv"$tls" --tls-max "$tls" --http1.1 --fail --silent --show-error --connect-timeout 8 --max-time 20 -o /dev/null -w "tls=$tls http=%{http_code} bytes=%{size_download} total=%{time_total}\n" https://brouter.de/brouter/segments4/ || true
 done

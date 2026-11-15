@@ -1,0 +1,78 @@
+name: Install owned free routing after all tests
+on:
+  push:
+    branches: [feature/unified-v4-routing]
+    paths: [.github/workflows/free-routing.yml, deploy/install-free-routing.sh, scripts/brouter-maps.py, deploy/po-puti-router.service, deploy/po-puti-router-maps.service, deploy/po-puti-router-maps.timer]
+  workflow_dispatch:
+    inputs:
+      reuse_existing_maps:
+        type: boolean
+        default: false
+        description: Reuse already delivered verified offline maps
+  schedule:
+    - cron: '20 4 * * 0'
+permissions:
+  contents: read
+concurrency:
+  group: po-puti-production
+  cancel-in-progress: false
+jobs:
+  verify:
+    uses: ./.github/workflows/verify.yml
+    permissions:
+      contents: read
+  android:
+    uses: ./.github/workflows/android-build.yml
+    permissions:
+      contents: read
+  install-free-router:
+    needs: [verify, android]
+    runs-on: ubuntu-24.04
+    environment: production
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Prepare official free OSM maps outside the VPS network
+        if: inputs.reuse_existing_maps != true
+        run: |
+          python3 scripts/brouter-maps.py "$RUNNER_TEMP/free-maps"
+          tar -C "$RUNNER_TEMP/free-maps/current" -cf "$RUNNER_TEMP/free-maps.tar" .
+      - name: Install isolated free router and probe real public road routes
+        env:
+          DEPLOY_HOST: ${{ secrets.POPUTI_DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.POPUTI_DEPLOY_USER }}
+          DEPLOY_KEY: ${{ secrets.POPUTI_DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.POPUTI_DEPLOY_KNOWN_HOSTS }}
+          DEPLOY_PORT: ${{ secrets.POPUTI_DEPLOY_PORT }}
+          CANDIDATE_SHA: ${{ github.sha }}
+          REUSE_MAPS: ${{ inputs.reuse_existing_maps }}
+        run: |
+          set -euo pipefail
+          umask 077
+          ssh_dir="$RUNNER_TEMP/free-router-ssh"
+          trap 'rm -rf "$ssh_dir"' EXIT
+          bash deploy/prepare-ssh.sh "$ssh_dir"
+          [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          ssh_options=(-i "$ssh_dir/key" -p "${DEPLOY_PORT:-22}" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$ssh_dir/known_hosts" -o ConnectTimeout=12)
+          transfer_dir=$(ssh "${ssh_options[@]}" "$DEPLOY_USER@$DEPLOY_HOST" 'umask 077; mktemp -d /var/tmp/po-puti-router-maps-XXXXXXXX')
+          [[ "$transfer_dir" =~ ^/var/tmp/po-puti-router-maps-[A-Za-z0-9]{8}$ ]]
+          if [[ "$REUSE_MAPS" != true ]]; then
+          scp -i "$ssh_dir/key" -P "${DEPLOY_PORT:-22}" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$ssh_dir/known_hosts" "$RUNNER_TEMP/free-maps.tar" "$DEPLOY_USER@$DEPLOY_HOST:$transfer_dir/maps.tar"
+          fi
+          cat > "$ssh_dir/install.sh" <<'REMOTE'
+          set -euo pipefail
+          umask 077
+          candidate="$1"
+          transfer_dir="$2"
+          [[ "$transfer_dir" =~ ^/var/tmp/po-puti-router-maps-[A-Za-z0-9]{8}$ ]]
+          [[ "$candidate" =~ ^[0-9a-f]{40}$ ]]
+          source_dir=$(mktemp -d /tmp/po-puti-free-router-source-XXXXXXXX)
+          trap 'rm -rf "$source_dir" "$transfer_dir"' EXIT
+          git -C /opt/po-puti fetch --no-tags origin "$candidate"
+          git -C /opt/po-puti archive "$candidate" | tar -x -C "$source_dir"
+          if [[ -f "$transfer_dir/maps.tar" ]]; then bash "$source_dir/deploy/install-free-routing.sh" "$transfer_dir/maps.tar"; else bash "$source_dir/deploy/install-free-routing.sh" --existing-maps; fi
+          REMOTE
+          { printf 'set -- %s %s\n' "$CANDIDATE_SHA" "$transfer_dir"; cat "$ssh_dir/install.sh"; } > "$ssh_dir/pinned-install.sh"
+          ssh -i "$ssh_dir/key" -p "${DEPLOY_PORT:-22}" -o BatchMode=yes -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$ssh_dir/known_hosts" -o ConnectTimeout=12 \
+            "$DEPLOY_USER@$DEPLOY_HOST" 'if [ "$(id -u)" -eq 0 ]; then exec bash -s; else exec sudo -n bash -s; fi' < "$ssh_dir/pinned-install.sh"

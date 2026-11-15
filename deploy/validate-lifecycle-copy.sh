@@ -11,5 +11,6 @@ snapshot_root=$(mktemp -d /var/backups/po-puti-v3-rehearsal-XXXXXXXX)
 git -C /opt/po-puti fetch --no-tags origin "$candidate"
 install -d -m 0700 "$snapshot_root/code"
 git -C /opt/po-puti archive "$candidate" | tar -x -C "$snapshot_root/code"
+python3 "$snapshot_root/code/deploy/routing-preflight.py"
 node "$snapshot_root/code/scripts/validate-lifecycle-copy.mjs" /var/lib/po-puti/po-puti.sqlite "$snapshot_root/data"
 echo "PRIVATE_REHEARSAL_SAVED: $snapshot_root; live database not replaced"

@@ -12,6 +12,8 @@ import { fileURLToPath } from 'node:url';
 import crypto from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import {migrateLifecycle,lifecycle} from './lifecycle.mjs';
+import {migrateRouting} from './migrations-v4.mjs';
+import {routing} from './routing.mjs';
 import {adminApi} from './admin-api.mjs';
 import {createPush,pushApi,processPush} from './push.mjs';
 
@@ -45,6 +47,8 @@ CREATE INDEX IF NOT EXISTS ix_notes_user ON notifications(recipient_id);
 CREATE INDEX IF NOT EXISTS ix_messages_ride ON messages(ride_id);
 `);
 await migrateLifecycle(database,DATA);
+await migrateRouting(database,DATA);
+const roadRouter=routing(database);
 const pushTransport=createPush();
 const life=lifecycle(database,{pushAvailable:pushTransport.available});
 const handleAdmin=adminApi(life);
@@ -121,7 +125,7 @@ function loggedIn(actor,req,res){const token=crypto.randomBytes(32).toString('ba
 function rideById(id){const ride=q('SELECT * FROM rides WHERE id=?',id);if(!ride)throw jsonError('Поездка не найдена',404);return ride}
 function confirmed(rideId,id1,id2){const ride=q('SELECT driver_id FROM rides WHERE id=?',rideId);return Boolean(ride&&((ride.driver_id===id1 && q("SELECT id FROM requests WHERE ride_id=? AND user_id=? AND status='accepted'",rideId,id2))||(ride.driver_id===id2&&q("SELECT id FROM requests WHERE ride_id=? AND user_id=? AND status='accepted'",rideId,id1))));}
 const publicPhoto=value=>typeof value==='string'&&/^\/uploads\/[a-f0-9]{32}\.(?:jpg|png|webp)$/.test(value)?value:'';
-function publicRide(r){return {...life.describe(r),id:r.id,driverId:r.driver_id,from:r.origin,to:r.destination,date:r.date,time:r.time,seats:r.seats,price:r.price,car:r.car,pickup:r.pickup,dropoff:r.dropoff,luggage:r.luggage,comment:r.comment,photo:publicPhoto(r.photo),occupiedSeats:r.occupied_seats??q("SELECT COUNT(*) n FROM requests WHERE ride_id=? AND status='accepted'",r.id).n,cancelled:!!r.cancelled};}
+function publicRide(r){return {...life.describe(r),statusLabel:life.statusLabel(r),departureTimeZone:r.departure_timezone,destinationTimeZone:r.destination_timezone,routeDistanceM:r.route_distance_m,routeCalculatedAt:r.route_calculated_at,routePoints:JSON.parse(r.route_points_json||'[]'),id:r.id,driverId:r.driver_id,from:r.origin,to:r.destination,date:r.date,time:r.time,seats:r.seats,price:r.price,car:r.car,pickup:r.pickup,dropoff:r.dropoff,luggage:r.luggage,comment:r.comment,photo:publicPhoto(r.photo),occupiedSeats:r.occupied_seats??q("SELECT COUNT(*) n FROM requests WHERE ride_id=? AND status='accepted'",r.id).n,cancelled:!!r.cancelled};}
 function checkedPhoto(value, maxBytes){
  if(value===undefined||value===null||value==='')return '';
  if(typeof value!=='string'||value.length>Math.ceil(maxBytes*4/3)+80)throw jsonError('Слишком большое фото',413);
@@ -187,7 +191,7 @@ function state(actor){
  // Discovery only needs upcoming rides, while each participant keeps access
  // to their own historical rides (driver or passenger). This bounds growth of
  // unrelated historical car photos in each recurring /state response.
- const rides=rows("SELECT rides.*, (SELECT COUNT(*) FROM requests WHERE ride_id=rides.id AND status='accepted') occupied_seats FROM rides WHERE ((departure_at>=? OR (departure_at IS NULL AND date>=?)) AND moderation_blocked=0 AND driver_id IN (SELECT id FROM users WHERE blocked_at IS NULL)) OR driver_id=? OR id IN (SELECT ride_id FROM requests WHERE user_id=?) ORDER BY date,time",now(),isoDay(),actor.id,actor.id).map(publicRide);
+ const rides=rows("SELECT rides.*, (SELECT COUNT(*) FROM requests WHERE ride_id=rides.id AND status='accepted') occupied_seats FROM rides WHERE ((departure_at>=? OR (departure_at IS NULL AND date>=?)) AND moderation_blocked=0 AND driver_id IN (SELECT id FROM users WHERE blocked_at IS NULL)) OR driver_id=? OR id IN (SELECT ride_id FROM requests WHERE user_id=?) ORDER BY date,time",now(),isoDay(),actor.id,actor.id).map(r=>({...publicRide(r),statusLabel:life.statusLabel(r,actor.id)}));
  const visibleIds=new Set([actor.id,...rides.map(r=>r.driverId)]);
  const peers=new Set([actor.id]);
  for(const r of reqs){
@@ -243,6 +247,10 @@ async function handleApi(req,res,path,data){const method=req.method;
  life.tick();
  const params=new URL(req.url,'http://localhost').searchParams;
  if(path.startsWith('/api/admin/'))requireAdmin(actor);
+ if(path==='/api/admin/v4/routing'&&method==='GET')return {...roadRouter.capabilities(),diagnostics:roadRouter.diagnostics(),missingEta:q('SELECT COUNT(*) n FROM rides WHERE estimated_arrival_at IS NULL').n};
+ if(path==='/api/routing/config'&&method==='GET')return roadRouter.capabilities();
+ if(path==='/api/places'&&method==='GET'){checkRate('places:'+actor.id);return roadRouter.places(params.get('q'))}
+ if(path==='/api/routes/estimate'&&method==='POST'){checkRate('routing:'+actor.id);return roadRouter.estimate(actor,data)}
  if(path.startsWith('/api/admin/v3/')){requireAdmin(actor);if(method==='POST')checkRate('admin:'+actor.id);return handleAdmin(actor,path,method,data,params)}
  if(/^\/api\/reviews(?:\/|$)/.test(path)&&['PUT','PATCH','DELETE'].includes(method))throw jsonError('Отправленный отзыв нельзя изменить или удалить',409);
  if(path.startsWith('/api/push/')){const result=pushApi(life,actor,path,method,data);if(result)return result}
@@ -265,19 +273,19 @@ async function handleApi(req,res,path,data){const method=req.method;
  }
  if(path==='/api/rides'&&method==='POST'){
    const retryKey=clean(data.clientKey,80);if(retryKey&&/^[a-zA-Z0-9_-]{10,80}$/.test(retryKey)){const old=q('SELECT ride_id FROM ride_operations WHERE user_id=? AND client_key=?',actor.id,retryKey);if(old)return {id:old.ride_id,repeated:true};}
-   const timing=life.addTiming(data);
+   const routePlan=roadRouter.prepare(actor,data);const timing=routePlan?null:life.addTiming(data);
    const from=clean(data.from,100),to=clean(data.to,100),date=clean(data.date,10),time=clean(data.time,5),car=clean(data.car,90);
    const seats=Number(data.seats),price=data.negotiable?null:Number(data.price);
     const validDate=/^\d{4}-\d{2}-\d{2}$/.test(date)&&!Number.isNaN(Date.parse(date+'T00:00:00Z'))&&new Date(date+'T00:00:00Z').toISOString().slice(0,10)===date;
     const validTime=/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(time);
-   if(!from||!to||from.toLowerCase()===to.toLowerCase()||!validDate||!validTime||(!timing&&date<isoDay())||!Number.isInteger(seats)||seats<1||seats>7||(!data.negotiable&&(!Number.isInteger(price)||price<0||price>100000))||!car)throw jsonError('Проверьте маршрут, дату, места, стоимость и автомобиль');
+   if(!from||!to||from.toLowerCase()===to.toLowerCase()||!validDate||!validTime||(!timing&&!routePlan&&date<isoDay())||!Number.isInteger(seats)||seats<1||seats>7||(!data.negotiable&&(!Number.isInteger(price)||price<0||price>100000))||!car)throw jsonError('Проверьте маршрут, дату, места, стоимость и автомобиль');
    const key=clean(data.clientKey,80);if(key&&!/^[a-zA-Z0-9_-]{10,80}$/.test(key))throw jsonError('Неверный идентификатор операции');
    if(key){const prev=q('SELECT ride_id FROM ride_operations WHERE user_id=? AND client_key=?',actor.id,key);if(prev)return {id:prev.ride_id,repeated:true};}
    const photo=await storePhoto(data.photo,120000);
    return transaction(()=>{
    // File writes yield the event loop: another request may have committed this key.
    if(key){const prev=q('SELECT ride_id FROM ride_operations WHERE user_id=? AND client_key=?',actor.id,key);if(prev)return {id:prev.ride_id,repeated:true};}
-   if(timing)life.addTiming(data);const id=uid();run('INSERT INTO rides(id,driver_id,origin,destination,date,time,seats,price,car,pickup,dropoff,luggage,comment,photo,cancelled,created) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',id,actor.id,from,to,date,time,seats,price,car,clean(data.pickup,150),clean(data.dropoff,150),clean(data.luggage,60),clean(data.comment,550),photo,0,now());life.attachTiming(id,timing);if(key)run('INSERT INTO ride_operations VALUES(?,?,?)',actor.id,key,id);return {id};});
+   if(timing)life.addTiming(data);if(routePlan)roadRouter.prepare(actor,data);const id=uid();run('INSERT INTO rides(id,driver_id,origin,destination,date,time,seats,price,car,pickup,dropoff,luggage,comment,photo,cancelled,created) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',id,actor.id,from,to,date,time,seats,price,car,clean(data.pickup,150),clean(data.dropoff,150),clean(data.luggage,60),clean(data.comment,550),photo,0,now());life.attachTiming(id,timing);roadRouter.attach(id,actor,routePlan);if(key)run('INSERT INTO ride_operations VALUES(?,?,?)',actor.id,key,id);return {id};});
  }
  if(path==='/api/requests'&&method==='POST'){
    const ride=rideById(clean(data.rideId,100));life.mutable(ride);if(ride.cancelled||ride.driver_id===actor.id)throw jsonError('Нельзя отправить заявку на эту поездку',409);
@@ -285,6 +293,8 @@ async function handleApi(req,res,path,data){const method=req.method;
      const occupied=q("SELECT COUNT(*) n FROM requests WHERE ride_id=? AND status='accepted'",ride.id).n;if(occupied>=ride.seats)throw jsonError('Свободных мест больше нет',409);
      const id=uid();run('INSERT INTO requests(id,ride_id,user_id,status,created) VALUES(?,?,?,?,?)',id,ride.id,actor.id,'pending',now());notify(ride.driver_id,'Новая заявка',`${actor.name} хочет поехать: ${ride.origin} → ${ride.destination}`,ride.id,'booking_created');return {id};});
  }
+ const routeEdit=path.match(/^\/api\/rides\/([^/]+)\/route$/);
+ if(routeEdit&&method==='POST'){const trip=rideById(routeEdit[1]);if(trip.driver_id!==actor.id)throw jsonError('Изменение маршрута доступно только водителю',403);life.mutable(trip);const reason=clean(data.reason,1000);if(!reason)throw jsonError('Укажите причину изменения маршрута');const plan=roadRouter.prepare(actor,data);if(!plan)throw jsonError('Пересчитайте дорожный маршрут или укажите ручную длительность и часовые пояса');const from=clean(data.from,100),to=clean(data.to,100);if(!from||!to||from===to)throw jsonError('Проверьте маршрут');return transaction(()=>{life.mutable(rideById(trip.id));run('UPDATE rides SET origin=?,destination=?,date=?,time=?,pickup=?,dropoff=? WHERE id=?',from,to,data.date,data.time,clean(data.pickup,150),clean(data.dropoff,150),trip.id);roadRouter.attach(trip.id,actor,plan,reason);for(const person of life.members(trip))life.event(person,'route_changed','route-change:'+uid(),'Маршрут обновлён','Водитель обновил маршрут или время отправления.','/ride/'+trip.id,trip.id);return {id:trip.id}})}
  const cancelledRequest=path.match(/^\/api\/requests\/([^/]+)\/cancel$/);
  if(cancelledRequest&&method==='POST'){
   const request=q('SELECT * FROM requests WHERE id=?',cancelledRequest[1]);if(!request)throw jsonError('Заявка не найдена',404);
