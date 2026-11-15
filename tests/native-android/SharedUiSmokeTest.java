@@ -47,7 +47,7 @@ public class SharedUiSmokeTest {
             // Exercise the real native plugin without registering users or calling the production API.
             CountDownLatch nativeDone = new CountDownLatch(1);
             scenario.onActivity(activity -> activity.getBridge().getWebView().evaluateJavascript(
-                "(async()=>{const p=Capacitor.registerPlugin('PoPutiFeatures');await p.setToken({token:'isolated-native-test-token'});const t=await p.getToken();window.nativeSecureOk=t.token==='isolated-native-test-token';await p.removeToken();await p.showSearch({query:{from:'Нефтекамск',to:'Уфа',date:'2030-05-10'},filter:'bus',ads:{enabled:false},items:[{type:'bus_service',id:'fixture',from:'Нефтекамск',to:'Уфа',departureAt:'2030-05-10T04:00:00Z',arrivalAt:'2030-05-10T06:00:00Z',departureTimeZone:'Asia/Yekaterinburg',destinationTimeZone:'Asia/Yekaterinburg',carrier:'Тестовый перевозчик',purchase:{url:'',cashier:''}}]});window.nativeSearchReady=true})()",
+                "(async()=>{const p=Capacitor.Plugins.PoPutiFeatures;await p.setToken({token:'isolated-native-test-token'});const t=await p.getToken();window.nativeSecureOk=t.token==='isolated-native-test-token';await p.removeToken();await p.showSearch({query:{from:'Нефтекамск',to:'Уфа',date:'2030-05-10'},filter:'bus',ads:{enabled:false},items:[{type:'bus_service',id:'fixture',from:'Нефтекамск',to:'Уфа',departureAt:'2030-05-10T04:00:00Z',arrivalAt:'2030-05-10T06:00:00Z',departureTimeZone:'Asia/Yekaterinburg',destinationTimeZone:'Asia/Yekaterinburg',carrier:'Тестовый перевозчик',purchase:{url:'',cashier:''}}]});window.nativeSearchReady=true})()",
                 answer -> nativeDone.countDown()
             ));
             assertTrue(nativeDone.await(5, TimeUnit.SECONDS));
