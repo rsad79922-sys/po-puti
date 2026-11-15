@@ -31,6 +31,19 @@ public class SharedUiSmokeTest {
             assertTrue("Packaged login UI must render: " + value, value.contains("\"ready\":true"));
             assertTrue("Real Capacitor bridge must report Android: " + value, value.contains("\"platform\":\"android\""));
             assertTrue("Native push plugin must be registered: " + value, value.contains("\"push\":true"));
+            // No Firebase project is configured in the default APK; logout cleanup must still finish.
+            CountDownLatch cleanup = new CountDownLatch(1);
+            scenario.onActivity(activity -> activity.getBridge().getWebView().evaluateJavascript(
+                "unsubscribeLocalPush().then(()=>window.nativeCleanupDone=true)", answer -> cleanup.countDown()
+            ));
+            assertTrue("Cleanup invocation must complete", cleanup.await(5, TimeUnit.SECONDS));
+            AtomicReference<String> cleanupResult = new AtomicReference<>("");
+            CountDownLatch finished = new CountDownLatch(1);
+            scenario.onActivity(activity -> activity.getBridge().getWebView().evaluateJavascript(
+                "window.nativeCleanupDone===true", answer -> { cleanupResult.set(answer); finished.countDown(); }
+            ));
+            assertTrue(finished.await(5, TimeUnit.SECONDS));
+            assertEquals("Logout cleanup must not require Firebase credentials", "true", cleanupResult.get());
         }
     }
 }

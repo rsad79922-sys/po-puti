@@ -463,7 +463,7 @@ async function enablePush(){
  }
  pushMessage='Уведомления включены для этого устройства.';refreshPushWidget();
 }
-async function unsubscribeLocalPush(){try{if(nativePlatform())await getNativePush()?.unregister?.();else if(navigator.serviceWorker){const reg=await navigator.serviceWorker.getRegistration();const sub=await reg?.pushManager.getSubscription();await sub?.unsubscribe()}}catch{}}
+async function unsubscribeLocalPush(){try{if(nativePlatform()){if(pushConfig?.android)await getNativePush()?.unregister?.();}else if(navigator.serviceWorker){const reg=await navigator.serviceWorker.getRegistration();const sub=await reg?.pushManager.getSubscription();await sub?.unsubscribe()}}catch{}}
 async function disablePush(){await api('/push/unsubscribe','POST',{deviceId:pushDeviceId()});await unsubscribeLocalPush();pushMessage='Уведомления отключены на этом устройстве.';refreshPushWidget()}
 const ADMIN_SECTIONS={summary:'Сводка',users:'Пользователи',rides:'Поездки',bookings:'Брони',reviews:'Отзывы',complaints:'Жалобы',notifications:'Уведомления',deliveries:'Доставка push',templates:'Шаблоны',audit:'Аудит',system:'Система'};
 function adminKey(){return JSON.stringify([accessToken,v3Admin.section,v3Admin.page,v3Admin.q,v3Admin.status,v3Admin.from,v3Admin.to])}
