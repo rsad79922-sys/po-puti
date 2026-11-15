@@ -1,0 +1,57 @@
+name: Install owned free routing after all tests
+on:
+  push:
+    branches: [feature/unified-v4-routing]
+    paths: [.github/workflows/free-routing.yml, deploy/install-free-routing.sh, scripts/brouter-maps.py, deploy/po-puti-router.service, deploy/po-puti-router-maps.service, deploy/po-puti-router-maps.timer]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: po-puti-production
+  cancel-in-progress: false
+jobs:
+  verify:
+    uses: ./.github/workflows/verify.yml
+    permissions:
+      contents: read
+  android:
+    uses: ./.github/workflows/android-build.yml
+    permissions:
+      contents: read
+  install-free-router:
+    needs: [verify, android]
+    runs-on: ubuntu-24.04
+    environment: production
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Install isolated free router and probe real public road routes
+        env:
+          DEPLOY_HOST: ${{ secrets.POPUTI_DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.POPUTI_DEPLOY_USER }}
+          DEPLOY_KEY: ${{ secrets.POPUTI_DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.POPUTI_DEPLOY_KNOWN_HOSTS }}
+          DEPLOY_PORT: ${{ secrets.POPUTI_DEPLOY_PORT }}
+          CANDIDATE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          umask 077
+          ssh_dir="$RUNNER_TEMP/free-router-ssh"
+          trap 'rm -rf "$ssh_dir"' EXIT
+          bash deploy/prepare-ssh.sh "$ssh_dir"
+          [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          cat > "$ssh_dir/install.sh" <<'REMOTE'
+          set -euo pipefail
+          umask 077
+          candidate="$1"
+          [[ "$candidate" =~ ^[0-9a-f]{40}$ ]]
+          source_dir=$(mktemp -d /tmp/po-puti-free-router-source-XXXXXXXX)
+          trap 'rm -rf "$source_dir"' EXIT
+          git -C /opt/po-puti fetch --no-tags origin "$candidate"
+          git -C /opt/po-puti archive "$candidate" | tar -x -C "$source_dir"
+          bash "$source_dir/deploy/install-free-routing.sh"
+          REMOTE
+          { printf 'set -- %s\n' "$CANDIDATE_SHA"; cat "$ssh_dir/install.sh"; } > "$ssh_dir/pinned-install.sh"
+          ssh -i "$ssh_dir/key" -p "${DEPLOY_PORT:-22}" -o BatchMode=yes -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$ssh_dir/known_hosts" -o ConnectTimeout=12 \
+            "$DEPLOY_USER@$DEPLOY_HOST" 'if [ "$(id -u)" -eq 0 ]; then exec bash -s; else exec sudo -n bash -s; fi' < "$ssh_dir/pinned-install.sh"

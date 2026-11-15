@@ -4,6 +4,10 @@ on:
     branches: [main]
     paths: [www/**, server/**, tests/native-android/**, capacitor.config.json, package.json, package-lock.json, .github/workflows/android-build.yml]
   workflow_dispatch:
+  workflow_call:
+    secrets:
+      FIREBASE_ANDROID_CONFIG_JSON:
+        required: false
 permissions:
   contents: read
 jobs:

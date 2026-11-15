@@ -55,3 +55,5 @@ npm run android:open
 Единая версия lifecycle/PWA/Android, миграции, серверное назначение администратора и настройка push: [инструкция v3](docs/LIFECYCLE-V3.md).
 
 Маршрутизация, IANA-зоны и единая приёмка v4: [UNIFIED-V4.md](docs/UNIFIED-V4.md).
+
+Выбран бесплатный собственный BRouter/OpenStreetMap; установка и ограничения описаны в [UNIFIED-V4.md](docs/UNIFIED-V4.md#выбранный-вариант-собственный-бесплатный-brouter).

@@ -1,0 +1,1 @@
+import {spawnSync} from 'node:child_process';import assert from 'node:assert/strict';const result=spawnSync('python3',['tests/test-brouter-maps.py'],{encoding:'utf8'});assert.equal(result.status,0,result.stderr);process.stdout.write(result.stdout);
