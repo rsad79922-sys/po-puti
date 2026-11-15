@@ -135,7 +135,7 @@ async function refreshRemote({fresh=false}={}){
 }
 function clearRemoteSession(preserveCookieMarker=false){
  unsubscribeLocalPush();routeEpoch++;routeBusy=false;lastRouteDraftKey=null;clearTimeout(routeTimer);pushConfig=null;pushMessage='';v3Admin={section:'summary',page:1,q:'',status:'',from:'',to:'',data:null,key:'',loading:false,error:''};
- accessToken='';featureState.queryKey='';featureState.private=null;featureState.bus={items:[],status:'idle'};featureState.epoch++;featureState.config=null;featureState.series=null;featureState.consent=false;if(typeof nativeBridge==='function'){const bridge=nativeBridge();bridge?.closeSearch().catch(()=>{});bridge?.removeToken().catch(()=>{});if(typeof nativeSearchVisible!=='undefined')nativeSearchVisible=false;}safeStorage.removeItem(TOKEN_STORE);if(!preserveCookieMarker)safeStorage.removeItem(COOKIE_STORE);adminData=null;serverError='';
+ accessToken='';featureState.queryKey='';featureState.private=null;featureState.privateCursor=null;featureState.bus={items:[],status:'idle'};featureState.epoch++;featureState.config=null;featureState.series=null;featureState.consent=false;if(typeof nativeBridge==='function'){const bridge=nativeBridge();bridge?.closeSearch().catch(()=>{});bridge?.removeToken().catch(()=>{});if(typeof nativeSearchVisible!=='undefined')nativeSearchVisible=false;}safeStorage.removeItem(TOKEN_STORE);if(!preserveCookieMarker)safeStorage.removeItem(COOKIE_STORE);adminData=null;serverError='';
  db={currentUserId:null,users:[],rides:[],requests:[],notifications:[],reviews:[],messages:[],reports:[],search:db.search,searchSubmitted:db.searchSubmitted,draft:null};
  pubStep=1;save();
 }

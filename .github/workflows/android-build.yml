@@ -42,6 +42,12 @@ jobs:
           grep -Fq "https://vputipoputka.ru" android/app/src/main/assets/public/config.js
       - name: Build Android debug APK
         run: cd android && ./gradlew assembleDebug --no-daemon
+      - name: Build unsigned release configuration (no signing or store upload)
+        run: cd android && ./gradlew assembleRelease --no-daemon
+      - name: Inspect merged permissions, privacy and release configuration
+        run: |
+          python3 tests/native-android/verify_manifest.py debug
+          python3 tests/native-android/verify_manifest.py release
       - name: Verify byte-identical PWA assets inside the compiled APK
         run: python3 tests/native-android/verify_assets.py
       - name: Enable KVM for the disposable Android emulator

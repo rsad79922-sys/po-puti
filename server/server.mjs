@@ -15,7 +15,7 @@ import {migrateLifecycle,lifecycle} from './lifecycle.mjs';
 import {normalizePhoto} from './media.mjs';
 import {migrateFeatures} from './migrations-v5.mjs';
 import {rideSeries} from './ride-series.mjs';
-import {safeTicketUrl,timetables} from './timetables.mjs';
+import {safeTicketUrl,prepareTimetableCache,timetables} from './timetables.mjs';
 import {clientConfig} from './client-config.mjs';
 import {adminMfa} from './admin-mfa.mjs';
 import {migrateRouting} from './migrations-v4.mjs';
@@ -59,11 +59,12 @@ const roadRouter=routing(database);
 const pushTransport=createPush();
 const life=lifecycle(database,{pushAvailable:pushTransport.available});
 const handleAdmin=adminApi(life);
-const series=rideSeries(life,roadRouter),buses=timetables(database),mfa=adminMfa(database);
+const busCache=prepareTimetableCache(new DatabaseSync(':memory:'));
+const series=rideSeries(life,roadRouter),buses=timetables(database,{cacheDb:busCache}),mfa=adminMfa(database);
 let stopping=false,pushInFlight=null;
 function background(){
  if(stopping)return;
- try{life.tick()}catch{console.error('[lifecycle-worker] failed; see protected worker state')}
+ try{buses.purgeExpired();life.tick()}catch{console.error('[lifecycle-worker] failed; see protected worker state')}
  if(pushInFlight)return;
  pushInFlight=processPush(life,pushTransport,{shouldStop:()=>stopping}).catch(()=>{life.run("UPDATE background_state SET last_error='Worker failed' WHERE name='push'");console.error('[push-worker] failed')}).finally(()=>{pushInFlight=null});
 }
@@ -254,17 +255,19 @@ async function handleApi(req,res,path,data){const method=req.method;
    if(user?.blocked_at)throw jsonError('Аккаунт заблокирован',403);
    if(!user||!crypto.timingSafeEqual(Buffer.from(expected,'hex'),Buffer.from(actual,'hex')))throw jsonError('Неверный логин или пароль',401);
    if(user.role==='admin'&&mfa.get(user.id)?.enabled)mfa.verify(user.id,data.mfaCode);
-   const session=loggedIn(user,req,res);if(user.role==='admin'&&mfa.get(user.id)?.enabled)run('UPDATE sessions SET mfa_verified_at=? WHERE token_hash=?',now(),sha(session.token||String(res.getHeader('set-cookie')).split(';')[0].split('=')[1]));return session;
+   const session=loggedIn(user,req,res);if(user.role==='admin'&&mfa.get(user.id)?.enabled)run('INSERT OR REPLACE INTO session_mfa VALUES(?,?)',sha(session.token||String(res.getHeader('set-cookie')).split(';')[0].split('=')[1]),now());return session;
  }
  const actor=requireActor(req);
  life.tick();
  const params=new URL(req.url,'http://localhost').searchParams;
- if(path.startsWith('/api/admin/')){requireAdmin(actor);if(mfa.required()&&path!=='/api/admin/mfa/enroll'&&path!=='/api/admin/mfa/verify'&&!q('SELECT mfa_verified_at FROM sessions WHERE token_hash=?',sha(requestToken(req)))?.mfa_verified_at)throw jsonError('Требуется подтверждение MFA',403);}
+ if(path.startsWith('/api/admin/')){requireAdmin(actor);if(mfa.required()&&path!=='/api/admin/mfa/enroll'&&path!=='/api/admin/mfa/verify'&&!q('SELECT verified_at FROM session_mfa WHERE token_hash=?',sha(requestToken(req)))?.verified_at)throw jsonError('Требуется подтверждение MFA',403);}
+ if(path==='/api/admin/v5/external'&&method==='GET')return {timetables:buses.status(),providers:rows('SELECT * FROM external_provider_state'),dueJobs:q('SELECT COUNT(*) n FROM lifecycle_due WHERE next_run_at<=?',now()).n};
+ if(path==='/api/admin/v5/deletion-requests'&&method==='GET')return {items:rows('SELECT d.user_id userId,d.requested_at requestedAt,d.status,u.username FROM deletion_requests d JOIN users u ON u.id=d.user_id ORDER BY d.requested_at LIMIT 100')};
  if(path==='/api/admin/v4/routing'&&method==='GET')return {...roadRouter.capabilities(),diagnostics:roadRouter.diagnostics(),missingEta:q('SELECT COUNT(*) n FROM rides WHERE estimated_arrival_at IS NULL').n};
  if(method==='POST'&&['/api/rides','/api/series','/api/requests','/api/messages','/api/profile','/api/reports','/api/complaints'].includes(path))checkRate('write:'+path+':'+actor.id);
  if(path==='/api/client-config'&&method==='GET')return {...clientConfig(),timetables:buses.status()};
  if(path==='/api/admin/mfa/enroll'&&method==='POST'){requireAdmin(actor);checkRate('mfa:'+actor.id);if(!passwordValid(data.password)||!crypto.timingSafeEqual(Buffer.from(actor.hash,'hex'),Buffer.from(await boundedHash(data.password,actor.salt),'hex')))throw jsonError('Неверный пароль',401);return mfa.enroll(actor)}
- if(path==='/api/admin/mfa/verify'&&method==='POST'){requireAdmin(actor);checkRate('mfa:'+actor.id);mfa.verify(actor.id,data.code,true);run('UPDATE sessions SET mfa_verified_at=? WHERE token_hash=?',now(),sha(requestToken(req)));return {ok:true}}
+ if(path==='/api/admin/mfa/verify'&&method==='POST'){requireAdmin(actor);checkRate('mfa:'+actor.id);mfa.verify(actor.id,data.code,true);run('INSERT OR REPLACE INTO session_mfa VALUES(?,?)',sha(requestToken(req)),now());return {ok:true}}
  if(path==='/api/privacy/consent'&&method==='POST'){if(typeof data.granted!=='boolean'||data.category!=='advertising')throw jsonError('Неверное согласие');run('INSERT INTO privacy_consents VALUES(?,?,?,?,?) ON CONFLICT(user_id,category) DO UPDATE SET version=excluded.version,granted=excluded.granted,updated_at=excluded.updated_at',actor.id,data.category,clientConfig().privacy.policyVersion,Number(data.granted),now());return {ok:true}}
  if(path==='/api/account/deletion-request'&&method==='POST'){if(data.confirmation!=='DELETE_MY_ACCOUNT')throw jsonError('Подтвердите запрос удаления аккаунта');run('INSERT OR IGNORE INTO deletion_requests VALUES(?,?,?)',actor.id,now(),'pending');return {ok:true,status:'pending',message:'Запрос зарегистрирован. Данные не удаляются до применения согласованной политики хранения.'}}
  if(path==='/api/series'&&method==='GET')return series.list(actor);
@@ -274,11 +277,12 @@ async function handleApi(req,res,path,data){const method=req.method;
   checkRate('search:'+actor.id);const kind=params.get('type')||'all';if(!['all','private','bus'].includes(kind))throw jsonError('Неизвестный тип поиска');
   const from=clean(params.get('from'),100),to=clean(params.get('to'),100),date=clean(params.get('date'),10),offset=Number(params.get('offset')||0);if(!Number.isInteger(offset)||offset<0||offset>10000)throw jsonError('Неверная страница');
   const a=buses.resolve(from),b=buses.resolve(to);const sourceFrom=a?.title||from,sourceTo=b?.title||to;
-  const privateRides=kind==='bus'?[]:rows("SELECT r.*, (SELECT COUNT(*) FROM requests WHERE ride_id=r.id AND status='accepted') occupied_seats FROM rides r JOIN users u ON u.id=r.driver_id WHERE r.cancelled=0 AND r.moderation_blocked=0 AND u.blocked_at IS NULL AND (r.departure_at>? OR (r.departure_at IS NULL AND r.date>=?)) AND (?='' OR r.origin=? COLLATE NOCASE) AND (?='' OR r.destination=? COLLATE NOCASE) AND (?='' OR r.date=?) AND r.seats>(SELECT COUNT(*) FROM requests WHERE ride_id=r.id AND status='accepted') ORDER BY r.date,r.time,r.id LIMIT 51 OFFSET ?",now(),isoDay(),sourceFrom,sourceFrom,sourceTo,sourceTo,date,date,offset).map(r=>({type:'private_ride',...publicRide(r)}));
-  const bus=kind==='private'?{items:[],status:'not_requested'}:await buses.search({from,to,date,offset});return {private:{items:privateRides.slice(0,50),nextOffset:privateRides.length>50?offset+50:null,status:privateRides.length?'ok':'empty'},bus};
+  let cursor={date:'',time:'',id:'',asOf:now()};if(params.has('cursor')){try{const raw=params.get('cursor');if(raw.length>500)throw Error();cursor=JSON.parse(Buffer.from(raw,'base64url').toString());if(!/^\d{4}-\d{2}-\d{2}$/.test(cursor.date)||!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(cursor.time)||typeof cursor.id!=='string'||cursor.id.length>100||!Number.isSafeInteger(cursor.asOf)||cursor.asOf>now()||cursor.asOf<0)throw Error()}catch{throw jsonError('Неверный курсор поиска')}}
+  const privateRides=kind==='bus'?[]:rows("SELECT r.*, (SELECT COUNT(*) FROM requests WHERE ride_id=r.id AND status='accepted') occupied_seats FROM rides r JOIN users u ON u.id=r.driver_id WHERE r.created<=? AND (r.date,r.time,r.id)>(?,?,?) AND r.cancelled=0 AND r.moderation_blocked=0 AND u.blocked_at IS NULL AND (r.departure_at>? OR (r.departure_at IS NULL AND r.date>=?)) AND (?='' OR r.origin=? COLLATE NOCASE) AND (?='' OR r.destination=? COLLATE NOCASE) AND (?='' OR r.date=?) AND r.seats>(SELECT COUNT(*) FROM requests WHERE ride_id=r.id AND status='accepted') ORDER BY r.date,r.time,r.id LIMIT 51 OFFSET ?",cursor.asOf,cursor.date,cursor.time,cursor.id,now(),isoDay(),sourceFrom,sourceFrom,sourceTo,sourceTo,date,date,offset).map(r=>({type:'private_ride',...publicRide(r)}));
+  const bus=kind==='private'?{items:[],status:'not_requested'}:await buses.search({from,to,date,offset});return {private:{items:privateRides.slice(0,50),nextOffset:privateRides.length>50?offset+50:null,nextCursor:privateRides.length>50?Buffer.from(JSON.stringify({date:privateRides[49].date,time:privateRides[49].time,id:privateRides[49].id,asOf:cursor.asOf})).toString('base64url'):null,status:privateRides.length?'ok':'empty'},bus};
  }
  if(path==='/api/admin/bus-catalog'&&method==='POST'){requireAdmin(actor);if(process.env.RASP_LICENSE_CONFIRMED!=='true')throw jsonError('Сначала подтвердите условия использования справочника',409);return buses.importCatalog(data)}
- if(path==='/api/admin/bus-purchase'&&method==='POST'){requireAdmin(actor);const source=buses.resolve(data.fromCode),destination=buses.resolve(data.toCode);const url=String(data.url||''),cashier=clean(data.cashier,500),sourceUrl=String(data.sourceUrl||'');if(!source||!destination||!data.threadUid||!/^\d{4}-\d{2}-\d{2}$/.test(data.date)||(!url&&!cashier)||!/^https:\/\//.test(sourceUrl)||!Number.isFinite(Number(data.validUntil))||Number(data.validUntil)<=now()||Number(data.validUntil)>now()+31*86400000)throw jsonError('Укажите проверенный рейс, источник и срок актуальности');if(url&&!safeTicketUrl(url))throw jsonError('Недопустимая ссылка');return transaction(()=>{life.audit(actor,'bus_purchase',String(data.threadUid),'verify',null,{date:data.date},data.reason);run('INSERT INTO bus_purchase_info VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(thread_uid,service_date,from_code,to_code) DO UPDATE SET url=excluded.url,cashier=excluded.cashier,source_url=excluded.source_url,verified_by=excluded.verified_by,verified_at=excluded.verified_at,valid_until=excluded.valid_until',uid(),clean(data.threadUid),data.date,source.code,destination.code,url,cashier,sourceUrl,actor.id,now(),Number(data.validUntil));return {ok:true}})}
+ if(path==='/api/admin/bus-purchase'&&method==='POST'){requireAdmin(actor);const source=buses.resolve(data.fromCode),destination=buses.resolve(data.toCode);const url=String(data.url||''),cashier=clean(data.cashier,500),sourceUrl=String(data.sourceUrl||'');if(!source||!destination||!data.threadUid||!/^\d{4}-\d{2}-\d{2}$/.test(data.date)||(!url&&!cashier)||!/^https:\/\//.test(sourceUrl)||!Number.isFinite(Number(data.validUntil))||Number(data.validUntil)<=now()||Number(data.validUntil)>now()+31*86400000)throw jsonError('Укажите проверенный рейс, источник и срок актуальности');if(url&&!safeTicketUrl(url))throw jsonError('Недопустимая ссылка');return transaction(()=>{life.audit(actor,'bus_purchase',String(data.threadUid),'verify',null,{date:data.date},data.reason);run('INSERT INTO bus_purchase_info VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(thread_uid,service_date,from_code,to_code) DO UPDATE SET url=excluded.url,cashier=excluded.cashier,source_url=excluded.source_url,verified_by=excluded.verified_by,verified_at=excluded.verified_at,valid_until=excluded.valid_until',uid(),clean(data.threadUid),data.date,source.code,destination.code,url,cashier,sourceUrl,actor.id,now(),Number(data.validUntil));buses.invalidatePurchases();return {ok:true}})}
  if(path==='/api/routing/config'&&method==='GET')return roadRouter.capabilities();
  if(path==='/api/places'&&method==='GET'){checkRate('places:'+actor.id);return roadRouter.places(params.get('q'))}
  if(path==='/api/routes/estimate'&&method==='POST'){checkRate('routing:'+actor.id);return roadRouter.estimate(actor,data)}
@@ -440,7 +444,7 @@ server.maxRequestsPerSocket=1000;
 for(const signal of ['SIGTERM','SIGINT'])process.on(signal,()=>{
  if(stopping)return;stopping=true;clearInterval(lifecycleTimer);
  const deadline=setTimeout(()=>process.exit(1),15000);deadline.unref();
- server.close(async()=>{if(pushInFlight)await pushInFlight;database.close();clearTimeout(deadline);process.exit(0)});
+ server.close(async()=>{if(pushInFlight)await pushInFlight;busCache.close();database.close();clearTimeout(deadline);process.exit(0)});
  server.closeIdleConnections();
 });
 // Expired credentials are maintenance data, never user records.

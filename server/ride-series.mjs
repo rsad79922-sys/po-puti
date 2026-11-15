@@ -53,6 +53,7 @@ export function rideSeries(life,router){
  }
  function update(actor,id,data){
   const s=get('SELECT * FROM ride_series WHERE id=?',id);if(!s)throw fail('Серия не найдена',404);if(s.driver_id!==actor.id)throw fail('Это не ваша серия',403);
+  if(data.seriesEnd&&data.seriesEnd!==s.end_date)throw fail('Границу существующей серии нельзя продлевать. Создайте новую серию.',409);
   const plan=router.prepare(actor,data);if(!plan||plan.etaSource==='manual')throw fail('Дождитесь автоматического расчёта',409);
   const from=String(data.from||'').trim(),to=String(data.to||'').trim();if(!from||!to||from.length>100||to.length>100||from===to)throw fail('Проверьте маршрут');
   return tx(()=>{const rides=all('SELECT * FROM rides WHERE series_id=? AND cancelled=0 AND departure_at>? ORDER BY date',id,clock());if(!rides.length)throw fail('Будущих поездок нет. Создайте новую серию.',409);

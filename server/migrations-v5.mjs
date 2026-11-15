@@ -19,6 +19,7 @@ export async function migrateFeatures(db,dir){
  CREATE UNIQUE INDEX ix_series_occurrence ON rides(series_id,service_date) WHERE series_id IS NOT NULL;
  CREATE INDEX ix_rides_departure ON rides(departure_at) WHERE cancelled=0 AND moderation_blocked=0;
  CREATE INDEX ix_rides_driver_date ON rides(driver_id,date,time);
+ CREATE INDEX ix_search_date_time ON rides(date,time,id) WHERE cancelled=0 AND moderation_blocked=0;
  CREATE INDEX ix_request_capacity ON requests(ride_id,status);
  CREATE INDEX ix_notification_unread ON notifications(recipient_id,read,created);
  CREATE INDEX ix_session_user ON sessions(user_id);
@@ -29,14 +30,13 @@ export async function migrateFeatures(db,dir){
  CREATE TRIGGER lifecycle_changed_ride AFTER UPDATE ON rides BEGIN INSERT OR REPLACE INTO lifecycle_due VALUES(NEW.id,0); END;
  CREATE TABLE external_usage(provider TEXT NOT NULL,requested_at INTEGER NOT NULL);
  CREATE INDEX ix_external_usage ON external_usage(provider,requested_at);
- CREATE TABLE external_cache(cache_key TEXT PRIMARY KEY,value_json TEXT NOT NULL,expires_at INTEGER NOT NULL);
- CREATE TABLE bus_places(code TEXT PRIMARY KEY,title TEXT NOT NULL,region TEXT NOT NULL DEFAULT '',time_zone TEXT NOT NULL,kind TEXT NOT NULL CHECK(kind IN ('settlement','station')),verified_at INTEGER NOT NULL,expires_at INTEGER NOT NULL,search_title TEXT NOT NULL);
+ CREATE TABLE external_provider_state(provider TEXT PRIMARY KEY,last_attempt_at INTEGER,last_success_at INTEGER,last_status INTEGER,last_error TEXT NOT NULL DEFAULT '');
  CREATE TABLE bus_purchase_info(id TEXT PRIMARY KEY,thread_uid TEXT NOT NULL,service_date TEXT NOT NULL,from_code TEXT NOT NULL,to_code TEXT NOT NULL,url TEXT NOT NULL DEFAULT '',cashier TEXT NOT NULL DEFAULT '',source_url TEXT NOT NULL,verified_by TEXT NOT NULL REFERENCES users(id),verified_at INTEGER NOT NULL,valid_until INTEGER NOT NULL,UNIQUE(thread_uid,service_date,from_code,to_code));
  CREATE TABLE media_files(url TEXT NOT NULL,owner_id TEXT NOT NULL REFERENCES users(id),sha256 TEXT NOT NULL,mime TEXT NOT NULL,bytes INTEGER NOT NULL,created_at INTEGER NOT NULL,PRIMARY KEY(owner_id,sha256),UNIQUE(owner_id,url));
  CREATE TABLE privacy_consents(user_id TEXT NOT NULL REFERENCES users(id),category TEXT NOT NULL,version TEXT NOT NULL,granted INTEGER NOT NULL,updated_at INTEGER NOT NULL,PRIMARY KEY(user_id,category));
  CREATE TABLE deletion_requests(user_id TEXT PRIMARY KEY REFERENCES users(id),requested_at INTEGER NOT NULL,status TEXT NOT NULL DEFAULT 'pending');
  CREATE TABLE admin_mfa(user_id TEXT PRIMARY KEY REFERENCES users(id),secret_enc TEXT NOT NULL,enabled INTEGER NOT NULL DEFAULT 0,last_step INTEGER NOT NULL DEFAULT -1);
- ALTER TABLE sessions ADD COLUMN mfa_verified_at INTEGER;
+ CREATE TABLE session_mfa(token_hash TEXT PRIMARY KEY REFERENCES sessions(token_hash) ON DELETE CASCADE,verified_at INTEGER NOT NULL);
  CREATE TABLE features_schema(version INTEGER PRIMARY KEY,applied_at INTEGER NOT NULL,backup_path TEXT NOT NULL);
  `);
  for(const table of ['requests','ride_confirmations','pair_reviews','reports']){

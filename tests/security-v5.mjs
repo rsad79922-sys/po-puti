@@ -15,12 +15,12 @@ try{
  assert.equal((await call('/admin/mfa/enroll',{},admin.token)).status,401,'enrollment requires password again');
  assert.equal((await call('/admin/mfa/enroll',{password},other.token)).status,403,'ordinary account cannot enroll administrator MFA');
  const setup=await call('/admin/mfa/enroll',{password},admin.token);assert.equal(setup.status,200);const step=Math.floor(Date.now()/30000);
- assert.equal((await call('/admin/mfa/verify',{code:totp(setup.data.secret,step-1)},admin.token)).status,200);
+ assert.equal((await call('/admin/mfa/verify',{code:totp(setup.data.secret,step)},admin.token)).status,200);
  assert.equal((await call('/admin/v3/summary',undefined,admin.token)).status,200);
  assert.equal((await call('/login',{username:'secure_admin',password})).status,401);
- const login=await call('/login',{username:'secure_admin',password,mfaCode:totp(setup.data.secret,step)});assert.equal(login.status,200);
+ const login=await call('/login',{username:'secure_admin',password,mfaCode:totp(setup.data.secret,step+1)});assert.equal(login.status,200);
  assert.equal((await call('/admin/v3/summary',undefined,login.data.token)).status,200);
- assert.equal((await call('/login',{username:'secure_admin',password,mfaCode:totp(setup.data.secret,step)})).status,401,'same OTP cannot create another session');
+ assert.equal((await call('/login',{username:'secure_admin',password,mfaCode:totp(setup.data.secret,step+1)})).status,401,'same OTP cannot create another session');
  const bytes=await sharp({create:{width:2,height:2,channels:3,background:'#42caba'}}).jpeg().toBuffer();const photo='data:image/jpeg;base64,'+bytes.toString('base64');
  assert.equal((await call('/profile',{name:'Владелец фото',photo},other.token)).status,200);
  db=new DatabaseSync(app.dir+'/po-puti.sqlite');const url=db.prepare('SELECT photo FROM users WHERE id=?').get(other.user.id).photo;
