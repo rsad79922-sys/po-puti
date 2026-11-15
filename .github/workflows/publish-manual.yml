@@ -26,8 +26,12 @@ concurrency:
 jobs:
   verify:
     uses: ./.github/workflows/verify.yml
+  android:
+    uses: ./.github/workflows/android-build.yml
+    secrets:
+      FIREBASE_ANDROID_CONFIG_JSON: ${{ secrets.FIREBASE_ANDROID_CONFIG_JSON }}
   release:
-    needs: verify
+    needs: [verify, android]
     if: github.ref == 'refs/heads/main' && ((github.event_name == 'push' && vars.POPUTI_AUTO_DEPLOY != 'false') || (github.event_name == 'workflow_dispatch' && inputs.confirmation == 'publish-vputipoputka.ru'))
     runs-on: ubuntu-24.04
     environment: production
