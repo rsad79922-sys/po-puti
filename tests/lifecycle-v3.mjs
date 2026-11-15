@@ -21,8 +21,8 @@ function trip({passengers=['p1'],departure=base-2*HOUR,duration=60,legacy=false}
  return id;
 }
 try{
- const snapshots=(await readdir(app.dir+'/migration-backups')).filter(x=>x.endsWith('.sqlite'));assert.equal(snapshots.length,1);const snapshot=new DatabaseSync(app.dir+'/migration-backups/'+snapshots[0],{readOnly:true});assert.equal(snapshot.prepare('PRAGMA integrity_check').get().integrity_check,'ok');assert(!snapshot.prepare("SELECT name FROM sqlite_master WHERE name='pair_reviews'").get(),'backup predates schema changes');snapshot.close();
- await migrateLifecycle(db,app.dir);assert.equal(((await readdir(app.dir+'/migration-backups')).filter(x=>x.endsWith('.sqlite'))).length,1,'migration replay must not run again');
+ const snapshots=(await readdir(app.dir+'/migration-backups')).filter(x=>x.startsWith('before-lifecycle')&&x.endsWith('.sqlite'));assert.equal(snapshots.length,1);const snapshot=new DatabaseSync(app.dir+'/migration-backups/'+snapshots[0],{readOnly:true});assert.equal(snapshot.prepare('PRAGMA integrity_check').get().integrity_check,'ok');assert(!snapshot.prepare("SELECT name FROM sqlite_master WHERE name='pair_reviews'").get(),'backup predates schema changes');snapshot.close();
+ await migrateLifecycle(db,app.dir);assert.equal(((await readdir(app.dir+'/migration-backups')).filter(x=>x.startsWith('before-lifecycle')&&x.endsWith('.sqlite'))).length,1,'migration replay must not run again');
  const future=trip({departure:base+HOUR});
  time=base+HOUR-60000;assert.equal(life.describe(life.ride(future)).phase,'scheduled');assert.doesNotThrow(()=>life.mutable(life.ride(future)));
  const pending=randomUUID();run('INSERT INTO requests(id,ride_id,user_id,status,created) VALUES(?,?,?,?,?)',pending,future,'p2','pending',base);
@@ -75,6 +75,6 @@ try{
  const sourceRows=JSON.stringify(rows('SELECT * FROM rides'));
  const rehearsal=spawnSync(process.execPath,['scripts/validate-lifecycle-copy.mjs',app.dir+'/po-puti.sqlite',app.dir+'/private-rehearsal'],{encoding:'utf8'});
  assert.equal(rehearsal.status,0,rehearsal.stderr+rehearsal.stdout);assert.match(rehearsal.stdout,/COPY_VALIDATION_OK/);assert.equal(JSON.stringify(rows('SELECT * FROM rides')),sourceRows,'rehearsal must not change the source database');
- run('UPDATE lifecycle_schema SET version=4');await assert.rejects(()=>migrateLifecycle(db,app.dir),/Unsupported/);run('UPDATE lifecycle_schema SET version=3');
+ run('UPDATE lifecycle_schema SET version=5 WHERE version=3');await assert.rejects(()=>migrateLifecycle(db,app.dir),/Unsupported/);run('UPDATE lifecycle_schema SET version=3 WHERE version=5');
  console.log('PASS: UTC boundaries, migration backup/replay, expiry, individual review clocks, immediate eligibility, privacy, immutable/idempotent reviews, strict auto ratings, dispute/admin audit, legacy history and manual/auto race');
 }finally{db.close();await app.stop()}

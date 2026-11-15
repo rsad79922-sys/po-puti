@@ -1,0 +1,27 @@
+import assert from 'node:assert/strict';import http from 'node:http';import {once} from 'node:events';import {DatabaseSync} from 'node:sqlite';import {randomUUID} from 'node:crypto';import {isolatedServer} from './helpers/server.mjs';
+const service=http.createServer((req,res)=>{res.setHeader('content-type','application/json');res.end(JSON.stringify({code:'Ok',routes:[{distance:1789500,duration:6000}]}))});service.listen(0,'127.0.0.1');await once(service,'listening');
+const app=await isolatedServer({ROUTING_PROVIDER:'osrm',ROUTING_URL:'http://127.0.0.1:'+service.address().port,ROUTING_API_KEY:'SECRET_TEST_ROUTER_KEY',APP_ORIGINS:'https://localhost'});let db;
+async function req(path,method='GET',body,client){const response=await fetch(app.base+'/api'+path,{method,headers:{'content-type':'application/json',...(client?.token?{Authorization:'Bearer '+client.token,Origin:'https://localhost'}:{}),...(client?.cookie?{Cookie:client.cookie,'X-Po-Puti-Session':'cookie'}:{})},body:body?JSON.stringify(body):undefined});return {status:response.status,data:await response.json(),cookie:response.headers.get('set-cookie')?.split(';')[0]}}
+const ok=async(...args)=>{const r=await req(...args);assert.equal(r.status,200,JSON.stringify({path:args[0],...r}));return r};
+try{
+ const native=(await ok('/register','POST',{username:'v4_native',password:'test-'+randomUUID()})).data;
+ const r=await fetch(app.base+'/api/register',{method:'POST',headers:{'content-type':'application/json','X-Po-Puti-Session':'cookie'},body:JSON.stringify({username:'v4_pwa',password:'test-'+randomUUID()})});const pwa={...(await r.json()),cookie:r.headers.get('set-cookie').split(';')[0]};
+ assert.equal((await req('/routing/config')).status,401);const config=(await ok('/routing/config','GET',undefined,pwa)).data;assert(config.routingConfigured);assert(!JSON.stringify(config).includes('SECRET_TEST'));
+ const points=[];for(const q of ['Москва','Екатеринбург'])points.push((await ok('/places?q='+encodeURIComponent(q),'GET',undefined,pwa)).data.items[0]);
+ const date=new Date(Date.now()+3*86400000).toISOString().slice(0,10),input={from:'Москва',to:'Екатеринбург',date,time:'23:00',seats:2,price:500,car:'Lada',routePoints:points};
+ const a=(await ok('/routes/estimate','POST',input,pwa)).data,b=(await ok('/routes/estimate','POST',input,native)).data;assert.equal(a.arrivalAt,b.arrivalAt);assert.equal(a.durationMinutes,100);assert.equal(a.arrivalLocal.timeZone,'Asia/Yekaterinburg');assert.equal(a.arrivalLocal.local.slice(11),'02:40');assert(a.arrivalLocal.local.slice(0,10)>date);
+ assert.equal((await req('/rides','POST',{...input,routeQuoteId:a.routeQuoteId},native)).status,409,'quotes cannot cross accounts');
+ const ride=(await ok('/rides','POST',{...input,routeQuoteId:b.routeQuoteId,estimatedDurationMinutes:1,clientKey:'route_'+randomUUID()},native)).data;
+ let state=(await ok('/state','GET',undefined,native)).data,trip=state.rides.find(t=>t.id===ride.id);assert.equal(trip.estimatedDurationMinutes,100);assert.equal(trip.etaSource,'osrm');assert.equal(trip.routeDistanceM,1789500);assert.equal(trip.departureTimeZone,'Europe/Moscow');assert.equal(trip.destinationTimeZone,'Asia/Yekaterinburg');assert.equal(trip.statusLabel,'Поездка запланирована');
+ const booking=(await ok('/requests','POST',{rideId:ride.id},pwa)).data;await ok('/requests/'+booking.id+'/accept','POST',{},native);
+ const changed={...input,time:'22:00'};const quote=(await ok('/routes/estimate','POST',changed,native)).data;assert.equal((await req('/rides/'+ride.id+'/route','POST',{...changed,routeQuoteId:quote.routeQuoteId,reason:'Изменение времени'},pwa)).status,403);
+ assert.equal((await req('/rides/'+ride.id+'/route','POST',{...changed,routeQuoteId:quote.routeQuoteId},native)).status,400);
+ await ok('/rides/'+ride.id+'/route','POST',{...changed,routeQuoteId:quote.routeQuoteId,reason:'Уточнение времени выезда'},native);
+ assert.equal((await ok('/state','GET',undefined,pwa)).data.requests.find(q=>q.id===booking.id).status,'accepted');
+ db=new DatabaseSync(app.dir+'/po-puti.sqlite');assert.equal(db.prepare('SELECT COUNT(*) n FROM ride_eta_history WHERE ride_id=?').get(ride.id).n,2);assert.equal((await req('/admin/v4/routing','GET',undefined,pwa)).status,403);assert.equal((await req('/admin/v3/rides/'+ride.id,'GET',undefined,pwa)).status,403);
+ db.prepare('UPDATE rides SET departure_at=?,estimated_arrival_at=? WHERE id=?').run(Date.now()-3*3600000,Date.now()-2*3600000,ride.id);
+ assert.equal((await req('/rides/'+ride.id+'/route','POST',{...changed,routeQuoteId:quote.routeQuoteId,reason:'Too late'},native)).status,409);
+ state=(await ok('/state','GET',undefined,pwa)).data;assert.equal(state.rides.find(t=>t.id===ride.id).statusLabel,'Подтвердите, состоялась ли поездка');assert.equal(state.requests.find(q=>q.id===booking.id).status,'accepted');
+ await ok('/confirmations','POST',{rideId:ride.id,answer:'yes'},pwa);state=(await ok('/state','GET',undefined,pwa)).data;assert.equal(state.participations.find(p=>p.rideId===ride.id).canConfirm,false);assert.equal(state.participations.find(p=>p.rideId===ride.id).answer,'yes');
+ console.log('PASS: authenticated cookie/Bearer routing API parity, owned quotes, authoritative duration/timezones, route edit permissions/history, accepted booking stability, post-departure 409 and exact confirmation label');
+}finally{db?.close();await app.stop();service.close();await once(service,'close')}

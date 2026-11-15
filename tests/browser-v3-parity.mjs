@@ -21,9 +21,9 @@ try{
  const driverId=nativeState.currentUserId,passengerId=pwaState.currentUserId;
  await native.goto(app.base+'/#/publish');await native.locator('#pub-from').fill('Москва');await native.locator('#pub-to').fill('Тверь');
  const date=new Date(Date.now()+3*86400000).toISOString().slice(0,10);
- await native.locator('#pub-date').fill(date);await native.locator('#pub-time').fill('21:00');await native.locator('[name=departureOffset]').selectOption('+05:00');await native.locator('[name=estimatedDurationMinutes]').fill('120');await native.locator('#pub-price').fill('500');await native.locator('#pub-car').fill('Lada');
+ await native.locator('#pub-date').fill(date);await native.locator('#pub-time').fill('21:00');await native.locator('[name=departureTimeZone]').selectOption('Europe/Moscow');await native.locator('[name=estimatedDurationMinutes]').fill('120');await native.locator('#pub-price').fill('500');await native.locator('#pub-car').fill('Lada');
  await native.locator('#publish-form [type=submit]').click();await native.locator('[data-action=publish-confirm]').click();await native.waitForURL('**/#/ride/*');
- const rideId=new URL(native.url()).hash.split('/').at(-1);assert.equal(publication.departureAt,date+'T21:00:00+05:00');assert.equal(publication.estimatedDurationMinutes,120);
+ const rideId=new URL(native.url()).hash.split('/').at(-1);assert.equal(publication.departureTimeZone,'Europe/Moscow');assert.equal(publication.estimatedDurationMinutes,120);
  await pwa.reload();await pwa.locator('#search-from').fill('Москва');await pwa.locator('#search-to').fill('Тверь');await pwa.locator('#search-date').fill(date);await pwa.locator('#search-form [type=submit]').click();await pwa.locator('.trip-card').click();await pwa.locator('[data-action=apply]').click();await pwa.locator('[data-action=apply-confirm]').click();await pwa.locator('.pill.pending').waitFor();
  await native.goto(app.base+'/#/trips');await native.reload();await native.locator('[data-action=accept-request]').click();await native.locator('[data-action=open-chat]').waitFor();
  db=new DatabaseSync(app.dir+'/po-puti.sqlite');db.prepare('UPDATE rides SET departure_at=?,estimated_arrival_at=? WHERE id=?').run(Date.now()-3*3600000,Date.now()-2*3600000,rideId);
