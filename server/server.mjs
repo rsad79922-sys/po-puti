@@ -12,6 +12,13 @@ import { fileURLToPath } from 'node:url';
 import crypto from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import {migrateLifecycle,lifecycle} from './lifecycle.mjs';
+import {normalizePhoto} from './media.mjs';
+import {migrateFeatures} from './migrations-v5.mjs';
+import {rideSeries} from './ride-series.mjs';
+import {safeTicketUrl,prepareTimetableCache,timetables} from './timetables.mjs';
+import {clientConfig} from './client-config.mjs';
+import {adminMfa} from './admin-mfa.mjs';
+import {accountPrivacy} from './account-privacy.mjs';
 import {migrateRouting} from './migrations-v4.mjs';
 import {routing} from './routing.mjs';
 import {adminApi} from './admin-api.mjs';
@@ -25,6 +32,7 @@ const UPLOADS = join(DATA, 'uploads');
 await mkdir(DATA, {recursive:true, mode:0o700});
 await mkdir(UPLOADS, {recursive:true, mode:0o700});
 const database = new DatabaseSync(join(DATA,'po-puti.sqlite'));
+database.function('casefold',{deterministic:true},value=>String(value||'').normalize('NFC').trim().toLocaleLowerCase('ru'));
 database.exec('PRAGMA journal_mode=WAL;PRAGMA foreign_keys=ON;PRAGMA busy_timeout=5000');
 database.exec(`
 CREATE TABLE IF NOT EXISTS users(id TEXT PRIMARY KEY, username TEXT UNIQUE NOT NULL, salt TEXT NOT NULL, hash TEXT NOT NULL, name TEXT NOT NULL, phone TEXT NOT NULL DEFAULT '', car TEXT NOT NULL DEFAULT '', photo TEXT NOT NULL DEFAULT '', role TEXT NOT NULL DEFAULT 'user' CHECK(role IN ('user','admin')), created INTEGER NOT NULL);
@@ -48,14 +56,18 @@ CREATE INDEX IF NOT EXISTS ix_messages_ride ON messages(ride_id);
 `);
 await migrateLifecycle(database,DATA);
 await migrateRouting(database,DATA);
+await migrateFeatures(database,DATA);
+const privacy=await accountPrivacy(database,DATA);
 const roadRouter=routing(database);
 const pushTransport=createPush();
 const life=lifecycle(database,{pushAvailable:pushTransport.available});
 const handleAdmin=adminApi(life);
+const busCache=prepareTimetableCache(new DatabaseSync(':memory:'));
+const series=rideSeries(life,roadRouter),buses=timetables(database,{cacheDb:busCache}),mfa=adminMfa(database);
 let stopping=false,pushInFlight=null;
 function background(){
  if(stopping)return;
- try{life.tick()}catch{console.error('[lifecycle-worker] failed; see protected worker state')}
+ try{buses.purgeExpired();privacy.purgeMedia();life.tick()}catch{console.error('[lifecycle-worker] failed; see protected worker state')}
  if(pushInFlight)return;
  pushInFlight=processPush(life,pushTransport,{shouldStop:()=>stopping}).catch(()=>{life.run("UPDATE background_state SET last_error='Worker failed' WHERE name='push'");console.error('[push-worker] failed')}).finally(()=>{pushInFlight=null});
 }
@@ -118,14 +130,14 @@ function checkRate(ip){
 }
 function notify(recipient,title,message,rideId='',kind='legacy',targetPath=''){const id=uid();run('INSERT INTO notifications(id,recipient_id,title,message,ride_id,read,created,target_path,kind) VALUES(?,?,?,?,?,?,?,?,?)',id,recipient,title,message,rideId,0,now(),targetPath||(rideId?'/ride/'+rideId:'/notifications'),kind);life.enqueueExisting(id)}
 function transaction(fn){database.exec('BEGIN IMMEDIATE');try{const val=fn();database.exec('COMMIT');return val}catch(err){database.exec('ROLLBACK');throw err}}
-function getActor(req){const token=requestToken(req);if(!token)return null;return q('SELECT u.* FROM users u INNER JOIN sessions s ON s.user_id=u.id WHERE s.token_hash=? AND s.expires>? AND u.blocked_at IS NULL',sha(token),now())||null;}
+function getActor(req){const token=requestToken(req);if(!token)return null;const actor=q('SELECT u.* FROM users u INNER JOIN sessions s ON s.user_id=u.id WHERE s.token_hash=? AND s.expires>? AND u.blocked_at IS NULL',sha(token),now());return actor&&!privacy.isUnavailable(actor.id)?actor:null;}
 function requireActor(req){const actor=getActor(req);if(!actor)throw jsonError('Необходим вход в аккаунт',401);return actor;}
 function requireAdmin(actor){if(actor.role!=='admin')throw jsonError('Нет прав администратора',403)}
-function loggedIn(actor,req,res){const token=crypto.randomBytes(32).toString('base64url');run('INSERT INTO sessions VALUES(?,?,?)',sha(token),actor.id,now()+SESSION_MS);const cookie=req.headers['x-po-puti-session']==='cookie';if(cookie)res.setHeader('set-cookie',sessionCookie(token));return {...(cookie?{}:{token}),user:{id:actor.id,username:actor.username,role:actor.role}}}
+function loggedIn(actor,req,res){const token=crypto.randomBytes(32).toString('base64url');run('INSERT INTO sessions(token_hash,user_id,expires) VALUES(?,?,?)',sha(token),actor.id,now()+SESSION_MS);const cookie=req.headers['x-po-puti-session']==='cookie';if(cookie)res.setHeader('set-cookie',sessionCookie(token));return {...(cookie?{}:{token}),user:{id:actor.id,username:actor.username,role:actor.role}}}
 function rideById(id){const ride=q('SELECT * FROM rides WHERE id=?',id);if(!ride)throw jsonError('Поездка не найдена',404);return ride}
 function confirmed(rideId,id1,id2){const ride=q('SELECT driver_id FROM rides WHERE id=?',rideId);return Boolean(ride&&((ride.driver_id===id1 && q("SELECT id FROM requests WHERE ride_id=? AND user_id=? AND status='accepted'",rideId,id2))||(ride.driver_id===id2&&q("SELECT id FROM requests WHERE ride_id=? AND user_id=? AND status='accepted'",rideId,id1))));}
 const publicPhoto=value=>typeof value==='string'&&/^\/uploads\/[a-f0-9]{32}\.(?:jpg|png|webp)$/.test(value)?value:'';
-function publicRide(r){return {...life.describe(r),statusLabel:life.statusLabel(r),departureTimeZone:r.departure_timezone,destinationTimeZone:r.destination_timezone,routeDistanceM:r.route_distance_m,routeCalculatedAt:r.route_calculated_at,routePoints:JSON.parse(r.route_points_json||'[]'),id:r.id,driverId:r.driver_id,from:r.origin,to:r.destination,date:r.date,time:r.time,seats:r.seats,price:r.price,car:r.car,pickup:r.pickup,dropoff:r.dropoff,luggage:r.luggage,comment:r.comment,photo:publicPhoto(r.photo),occupiedSeats:r.occupied_seats??q("SELECT COUNT(*) n FROM requests WHERE ride_id=? AND status='accepted'",r.id).n,cancelled:!!r.cancelled};}
+function publicRide(r){return {...life.describe(r),statusLabel:life.statusLabel(r),departureTimeZone:r.departure_timezone,destinationTimeZone:r.destination_timezone,routeDistanceM:r.route_distance_m,routeCalculatedAt:r.route_calculated_at,routePoints:JSON.parse(r.route_points_json||'[]'),id:r.id,driverId:r.driver_id,from:r.origin,to:r.destination,date:r.date,time:r.time,seats:r.seats,price:r.price,car:r.car,pickup:r.pickup,dropoff:r.dropoff,luggage:r.luggage,comment:r.comment,photo:publicPhoto(r.photo),seriesId:r.series_id||null,occupiedSeats:r.occupied_seats??q("SELECT COUNT(*) n FROM requests WHERE ride_id=? AND status='accepted'",r.id).n,cancelled:!!r.cancelled};}
 function checkedPhoto(value, maxBytes){
  if(value===undefined||value===null||value==='')return '';
  if(typeof value!=='string'||value.length>Math.ceil(maxBytes*4/3)+80)throw jsonError('Слишком большое фото',413);
@@ -139,16 +151,23 @@ function checkedPhoto(value, maxBytes){
  if(!jpg&&!png&&!webp)throw jsonError('Формат изображения не соответствует файлу');
  return value;
 }
-async function storePhoto(value,maxBytes){
+async function storePhoto(value,maxBytes,ownerId){
+ if(ownerId)return privacy.withUserLock(ownerId,()=>{if(privacy.isUnavailable(ownerId)||q('SELECT blocked_at FROM users WHERE id=?',ownerId)?.blocked_at)throw jsonError('Аккаунт недоступен',401);return storePhotoUnlocked(value,maxBytes,ownerId)});
+ return storePhotoUnlocked(value,maxBytes,ownerId);
+}
+async function storePhotoUnlocked(value,maxBytes,ownerId){
  if(!value)return '';
- if(typeof value==='string' && /^\/uploads\/[a-f0-9]{32}\.(?:jpg|png|webp)$/.test(value))return value;
- const data=checkedPhoto(value,maxBytes);
+ if(typeof value==='string' && /^\/uploads\/[a-f0-9]{32}\.(?:jpg|png|webp)$/.test(value)){if(ownerId&&!q('SELECT 1 FROM media_files WHERE url=? AND owner_id=?',value,ownerId)&&!q('SELECT 1 FROM users WHERE id=? AND photo=?',ownerId,value)&&!q('SELECT 1 FROM rides WHERE driver_id=? AND photo=?',ownerId,value))throw jsonError('Это не ваше фото',403);return value;}
+ let data=checkedPhoto(value,maxBytes);
+ if(ownerId&&data){const bytes=await normalizePhoto(Buffer.from(data.split(',')[1],'base64'),maxBytes);data='data:image/jpeg;base64,'+bytes.toString('base64');}
  if(!data)return '';
  const match=data.match(/^data:image\/(jpeg|png|webp);base64,/);
  const ext=match[1]==='jpeg'?'jpg':match[1];
- const filename=crypto.randomBytes(16).toString('hex')+'.'+ext;
- await writeFile(join(UPLOADS,filename),Buffer.from(data.split(',')[1],'base64'),{flag:'wx',mode:0o600});
- return '/uploads/'+filename;
+ const digest=sha(Buffer.from(data.split(',')[1],'base64'));
+ if(ownerId){const old=q('SELECT url FROM media_files WHERE owner_id=? AND sha256=?',ownerId,digest);if(old)return old.url;}
+ const filename=(ownerId?sha(ownerId+':'+digest).slice(0,32):crypto.randomBytes(16).toString('hex'))+'.'+ext;
+ try{await writeFile(join(UPLOADS,filename),Buffer.from(data.split(',')[1],'base64'),{flag:'wx',mode:0o600})}catch(error){if(!ownerId||error.code!=='EEXIST')throw error}
+ const url='/uploads/'+filename;if(ownerId){run('INSERT OR IGNORE INTO media_files VALUES(?,?,?,?,?,?)',url,ownerId,digest,'image/'+match[1],Buffer.from(data.split(',')[1],'base64').length,now());return q('SELECT url FROM media_files WHERE owner_id=? AND sha256=?',ownerId,digest).url;}return url;
 }
 async function migrateLegacyPhotos(){
  for(const [table,idColumn] of [['users','id'],['rides','id']]){
@@ -227,27 +246,60 @@ function state(actor){
  const messages=rows('SELECT * FROM messages WHERE from_id=? OR to_id=? ORDER BY created DESC LIMIT 1000',actor.id,actor.id).map(m=>({id:m.id,rideId:m.ride_id,fromId:m.from_id,toId:m.to_id,text:m.text,created:m.created}));
  return {decisions:rows("SELECT d.id,d.ride_id rideId,d.report_id reportId,d.decision,d.comment,d.created_at createdAt FROM moderation_decisions d JOIN rides r ON r.id=d.ride_id WHERE r.driver_id=? OR EXISTS(SELECT 1 FROM requests WHERE ride_id=r.id AND user_id=? AND status='accepted') OR EXISTS(SELECT 1 FROM reports WHERE id=d.report_id AND author_id=?) ORDER BY d.created_at DESC LIMIT 100",actor.id,actor.id,actor.id),serverNow:now(),currentUserId:actor.id,users,rides,requests:reqs.filter(r=>r.user_id===actor.id||life.describe(rideById(r.ride_id)).phase==='scheduled').map(r=>({id:r.id,rideId:r.ride_id,userId:r.user_id,status:r.expired_at?'expired':r.status,created:r.created})),notifications,unreadCount:q('SELECT COUNT(*) n FROM notifications WHERE recipient_id=? AND read=0',actor.id).n,reviews:[...reviews.map(r=>({...r,source:'legacy',isAuto:false,isPublished:r.moderationStatus!=='blocked'})),...life.reviewsFor(actor.id,visibleIds)],messages,reports:rows('SELECT id,ride_id rideId,reason,details,status,decision,created FROM reports WHERE author_id=? ORDER BY created DESC LIMIT 100',actor.id),participations:rides.filter(r=>r.driverId===actor.id||reqs.some(q=>q.ride_id===r.id&&q.user_id===actor.id&&q.status==='accepted')).map(r=>life.participation(rideById(r.id),actor.id))};
 }
-function cancelRide(ride,actor,asAdmin=false,reason=''){life.mutable(ride);if(asAdmin&&(!reason||typeof reason!=='string'))throw jsonError('Укажите причину отмены');if(ride.driver_id!==actor.id&&!asAdmin)throw jsonError('Недостаточно прав',403);if(ride.cancelled)throw jsonError('Поездка уже отменена',409);transaction(()=>{if(asAdmin)life.audit(actor,'ride',ride.id,'cancel',{cancelled:false},{cancelled:true},reason);run('UPDATE rides SET cancelled=1 WHERE id=?',ride.id);for(const r of rows("SELECT * FROM requests WHERE ride_id=? AND status IN ('pending','accepted')",ride.id)){run("UPDATE requests SET status='cancelled' WHERE id=?",r.id);notify(r.user_id,'Поездка отменена',`${ride.origin} → ${ride.destination}: поездка отменена`,ride.id,'ride_cancelled')}});return {ok:true};}
+function cancelRide(ride,actor,asAdmin=false,reason=''){life.mutable(ride);if(asAdmin&&(!reason||typeof reason!=='string'))throw jsonError('Укажите причину отмены');if(ride.driver_id!==actor.id&&!asAdmin)throw jsonError('Недостаточно прав',403);if(ride.cancelled)throw jsonError('Поездка уже отменена',409);transaction(()=>{if(asAdmin)life.audit(actor,'ride',ride.id,'cancel',{cancelled:false},{cancelled:true},reason);run('UPDATE rides SET cancelled=1 WHERE id=?',ride.id);if(ride.series_id)run('INSERT OR IGNORE INTO ride_series_exceptions VALUES(?,?,?)',ride.series_id,ride.date,'Водитель отменил эту дату');for(const r of rows("SELECT * FROM requests WHERE ride_id=? AND status IN ('pending','accepted')",ride.id)){run("UPDATE requests SET status='cancelled' WHERE id=?",r.id);notify(r.user_id,'Поездка отменена',`${ride.origin} → ${ride.destination}: поездка отменена`,ride.id,'ride_cancelled')}});return {ok:true};}
 async function handleApi(req,res,path,data){const method=req.method;
  if(path==='/api/health' && method==='GET')return {ok:q('SELECT 1 AS ok').ok===1,backend:'sqlite',version:'0.2',release:process.env.RELEASE_SHA||'development'};
+ if(path==='/api/public-config'&&method==='GET')return {privacy:clientConfig().privacy};
  if(path==='/api/register' && method==='POST'){
-   checkRate(clientIp(req));const uname=clean(data.username,33).toLowerCase();if(!usernameValid(uname)||!passwordValid(data.password))throw jsonError('Логин должен содержать 3–32 символа, пароль — не менее 8');
+   checkRate(clientIp(req));if(data.clientVersion===5&&data.termsAccepted!==true)throw jsonError('Подтвердите согласие с условиями обработки данных');const uname=clean(data.username,33).toLowerCase();if(!usernameValid(uname)||!passwordValid(data.password))throw jsonError('Логин должен содержать 3–32 символа, пароль — не менее 8');
    if(q('SELECT id FROM users WHERE username=?',uname))throw jsonError('Этот логин уже занят',409);
    const id=uid(),salt=crypto.randomBytes(20).toString('hex'),hash=await boundedHash(data.password,salt);try{run('INSERT INTO users(id,username,salt,hash,name,role,created) VALUES(?,?,?,?,?,?,?)',id,uname,salt,hash,uname,'user',now())}catch(error){if(q('SELECT id FROM users WHERE username=?',uname))throw jsonError('Этот логин уже занят',409);throw error}
-   return loggedIn(q('SELECT * FROM users WHERE id=?',id),req,res);
+   if(data.termsAccepted===true)run('INSERT INTO privacy_consents VALUES(?,?,?,?,?)',id,'terms',clientConfig().privacy.policyVersion,1,now());return loggedIn(q('SELECT * FROM users WHERE id=?',id),req,res);
  }
  if(path==='/api/login' && method==='POST'){
    checkRate(clientIp(req));if(!passwordValid(data.password))throw jsonError('Неверный логин или пароль',401);const uname=clean(data.username,33).toLowerCase();const user=q('SELECT * FROM users WHERE username=?',uname);
    const salt=user?.salt||'no-user-salt',expected=user?.hash||'0'.repeat(128),actual=await boundedHash(data.password,salt);
-   if(user?.blocked_at)throw jsonError('Аккаунт заблокирован',403);
+   if(user?.blocked_at||user&&privacy.isUnavailable(user.id))throw jsonError('Аккаунт заблокирован',403);
    if(!user||!crypto.timingSafeEqual(Buffer.from(expected,'hex'),Buffer.from(actual,'hex')))throw jsonError('Неверный логин или пароль',401);
-   return loggedIn(user,req,res);
+   if(user.role==='admin'&&mfa.get(user.id)?.enabled)mfa.verify(user.id,data.mfaCode);
+   const session=loggedIn(user,req,res);if(user.role==='admin'&&mfa.get(user.id)?.enabled)run('INSERT OR REPLACE INTO session_mfa VALUES(?,?)',sha(session.token||String(res.getHeader('set-cookie')).split(';')[0].split('=')[1]),now());return session;
  }
  const actor=requireActor(req);
  life.tick();
  const params=new URL(req.url,'http://localhost').searchParams;
- if(path.startsWith('/api/admin/'))requireAdmin(actor);
+ if(path.startsWith('/api/admin/')){requireAdmin(actor);const verified=q('SELECT verified_at FROM session_mfa WHERE token_hash=?',sha(requestToken(req)))?.verified_at;if((mfa.required()||mfa.get(actor.id)?.enabled)&&path!=='/api/admin/mfa/enroll'&&path!=='/api/admin/mfa/verify'&&(!verified||now()-verified>8*3600000))throw jsonError('Требуется подтверждение MFA',403);}
+ if(path==='/api/admin/v5/external'&&method==='GET')return {timetables:buses.status(),providers:rows('SELECT * FROM external_provider_state'),dueJobs:q('SELECT COUNT(*) n FROM lifecycle_due WHERE next_run_at<=?',now()).n};
+ if(path==='/api/admin/v5/deletion-requests'&&method==='GET')return {items:rows('SELECT d.user_id userId,d.requested_at requestedAt,d.status,u.username FROM deletion_requests d JOIN users u ON u.id=d.user_id ORDER BY d.requested_at LIMIT 100')};
  if(path==='/api/admin/v4/routing'&&method==='GET')return {...roadRouter.capabilities(),diagnostics:roadRouter.diagnostics(),missingEta:q('SELECT COUNT(*) n FROM rides WHERE estimated_arrival_at IS NULL').n};
+ if(method==='POST'&&['/api/rides','/api/series','/api/requests','/api/messages','/api/profile','/api/reports','/api/complaints'].includes(path))checkRate('write:'+path+':'+actor.id);
+ if(path==='/api/client-config'&&method==='GET'){const config=clientConfig();if(actor.role==='admin')config.ads.enabled=false;return {...config,timetables:buses.status()};}
+ if(path==='/api/admin/mfa/enroll'&&method==='POST'){requireAdmin(actor);checkRate('mfa:'+actor.id);if(!passwordValid(data.password)||!crypto.timingSafeEqual(Buffer.from(actor.hash,'hex'),Buffer.from(await boundedHash(data.password,actor.salt),'hex')))throw jsonError('Неверный пароль',401);const enrollment=mfa.enroll(actor);life.audit(actor,'user',actor.id,'mfa_enroll',{enabled:false},{pending:true},'Администратор подтвердил пароль для настройки MFA');return enrollment}
+ if(path==='/api/admin/mfa/verify'&&method==='POST'){requireAdmin(actor);checkRate('mfa:'+actor.id);mfa.verify(actor.id,data.code,true);run('INSERT OR REPLACE INTO session_mfa VALUES(?,?)',sha(requestToken(req)),now());life.audit(actor,'user',actor.id,'mfa_verified',{}, {verified:true},'Администратор подтвердил MFA');return {ok:true}}
+ if(path==='/api/privacy/consent'&&method==='POST'){if(typeof data.granted!=='boolean'||data.category!=='advertising')throw jsonError('Неверное согласие');run('INSERT INTO privacy_consents VALUES(?,?,?,?,?) ON CONFLICT(user_id,category) DO UPDATE SET version=excluded.version,granted=excluded.granted,updated_at=excluded.updated_at',actor.id,data.category,clientConfig().privacy.policyVersion,Number(data.granted),now());return {ok:true}}
+ if(path==='/api/account/deletion-request'&&method==='POST'){if(data.confirmation!=='DELETE_MY_ACCOUNT')throw jsonError('Подтвердите запрос удаления аккаунта');run('INSERT OR IGNORE INTO deletion_requests VALUES(?,?,?)',actor.id,now(),'pending');return {ok:true,status:'pending',message:'Запрос зарегистрирован. Данные не удаляются до применения согласованной политики хранения.'}}
+ if(path==='/api/account/delete'&&method==='POST'){
+  checkRate('erase:'+actor.id);
+  if(actor.role==='admin'&&(mfa.required()||mfa.get(actor.id)?.enabled)){const verified=q('SELECT verified_at FROM session_mfa WHERE token_hash=?',sha(requestToken(req)))?.verified_at;if(!verified||now()-verified>8*3600000)throw jsonError('Требуется подтверждение MFA',403);}
+  if(data.confirmation!=='DELETE_MY_ACCOUNT'||(data.userId!==undefined&&data.userId!==actor.id))throw jsonError('Подтвердите удаление своего аккаунта');
+  if(!passwordValid(data.password))throw jsonError('Повторно введите пароль',401);
+  const hash=await boundedHash(data.password,actor.salt);
+  if(!crypto.timingSafeEqual(Buffer.from(hash,'hex'),Buffer.from(actor.hash,'hex')))throw jsonError('Неверный пароль',401);
+  requireActor(req);const result=await privacy.erase(actor.id);
+  res.setHeader('set-cookie',[sessionCookie(''),'poputi_session=; Path=/api; HttpOnly; SameSite=Strict; Max-Age=0'+(PUBLIC_ORIGIN?'; Secure':'')]);return result;
+ }
+ if(path==='/api/series'&&method==='GET')return series.list(actor);
+ const seriesAction=path.match(/^\/api\/series\/([^/]+)\/(cancel|update)$/);if(seriesAction&&method==='POST'){checkRate('series-edit:'+actor.id);return seriesAction[2]==='cancel'?series.cancel(actor,seriesAction[1]):series.update(actor,seriesAction[1],data)}
+ if(path==='/api/search/places'&&method==='GET'){checkRate('rasp-places:'+actor.id);return buses.places(params.get('q'))}
+ if(path==='/api/search'&&method==='GET'){
+  checkRate('search:'+actor.id);const kind=params.get('type')||'all';if(!['all','private','bus'].includes(kind))throw jsonError('Неизвестный тип поиска');
+  const from=clean(params.get('from'),100),to=clean(params.get('to'),100),date=clean(params.get('date'),10),offset=Number(params.get('offset')||0);if(!Number.isInteger(offset)||offset<0||offset>10000)throw jsonError('Неверная страница');
+  const a=buses.resolve(from),b=buses.resolve(to);const sourceFrom=a?.title||from,sourceTo=b?.title||to;
+  let cursor={date:'',time:'',id:'',asOf:now()};if(params.has('cursor')){try{const raw=params.get('cursor');if(raw.length>500)throw Error();cursor=JSON.parse(Buffer.from(raw,'base64url').toString());if(!/^\d{4}-\d{2}-\d{2}$/.test(cursor.date)||!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(cursor.time)||typeof cursor.id!=='string'||cursor.id.length>100||!Number.isSafeInteger(cursor.asOf)||cursor.asOf>now()||cursor.asOf<0)throw Error()}catch{throw jsonError('Неверный курсор поиска')}}
+  const privateRides=kind==='bus'?[]:rows("SELECT r.*, (SELECT COUNT(*) FROM requests WHERE ride_id=r.id AND status='accepted') occupied_seats FROM rides r JOIN users u ON u.id=r.driver_id WHERE r.created<=? AND (r.date,r.time,r.id)>(?,?,?) AND r.cancelled=0 AND r.moderation_blocked=0 AND u.blocked_at IS NULL AND (r.departure_at>? OR (r.departure_at IS NULL AND r.date>=?)) AND (?='' OR casefold(r.origin)=casefold(?)) AND (?='' OR casefold(r.destination)=casefold(?)) AND (?='' OR r.date=?) AND r.seats>(SELECT COUNT(*) FROM requests WHERE ride_id=r.id AND status='accepted') ORDER BY r.date,r.time,r.id LIMIT 51 OFFSET ?",cursor.asOf,cursor.date,cursor.time,cursor.id,now(),isoDay(),sourceFrom,sourceFrom,sourceTo,sourceTo,date,date,offset).map(r=>({type:'private_ride',...publicRide(r)}));
+  const bus=kind==='private'?{items:[],status:'not_requested'}:await buses.search({from,to,date,offset});return {private:{items:privateRides.slice(0,50),nextOffset:privateRides.length>50?offset+50:null,nextCursor:privateRides.length>50?Buffer.from(JSON.stringify({date:privateRides[49].date,time:privateRides[49].time,id:privateRides[49].id,asOf:cursor.asOf})).toString('base64url'):null,status:privateRides.length?'ok':'empty'},bus};
+ }
+ if(path==='/api/admin/bus-catalog'&&method==='POST'){requireAdmin(actor);if(process.env.RASP_LICENSE_CONFIRMED!=='true')throw jsonError('Сначала подтвердите условия использования справочника',409);return buses.importCatalog(data)}
+ if(path==='/api/admin/bus-purchase'&&method==='POST'){requireAdmin(actor);const source=buses.resolve(data.fromCode),destination=buses.resolve(data.toCode);const url=String(data.url||''),cashier=clean(data.cashier,500),sourceUrl=String(data.sourceUrl||'');if(!source||!destination||!data.threadUid||!/^\d{4}-\d{2}-\d{2}$/.test(data.date)||(!url&&!cashier)||!/^https:\/\//.test(sourceUrl)||!Number.isFinite(Number(data.validUntil))||Number(data.validUntil)<=now()||Number(data.validUntil)>now()+31*86400000)throw jsonError('Укажите проверенный рейс, источник и срок актуальности');if(url&&!safeTicketUrl(url))throw jsonError('Недопустимая ссылка');return transaction(()=>{life.audit(actor,'bus_purchase',String(data.threadUid),'verify',null,{date:data.date},data.reason);run('INSERT INTO bus_purchase_info VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(thread_uid,service_date,from_code,to_code) DO UPDATE SET url=excluded.url,cashier=excluded.cashier,source_url=excluded.source_url,verified_by=excluded.verified_by,verified_at=excluded.verified_at,valid_until=excluded.valid_until',uid(),clean(data.threadUid),data.date,source.code,destination.code,url,cashier,sourceUrl,actor.id,now(),Number(data.validUntil));buses.invalidatePurchases();return {ok:true}})}
  if(path==='/api/routing/config'&&method==='GET')return roadRouter.capabilities();
  if(path==='/api/places'&&method==='GET'){checkRate('places:'+actor.id);return roadRouter.places(params.get('q'))}
  if(path==='/api/routes/estimate'&&method==='POST'){checkRate('routing:'+actor.id);return roadRouter.estimate(actor,data)}
@@ -255,7 +307,7 @@ async function handleApi(req,res,path,data){const method=req.method;
  if(/^\/api\/reviews(?:\/|$)/.test(path)&&['PUT','PATCH','DELETE'].includes(method))throw jsonError('Отправленный отзыв нельзя изменить или удалить',409);
  if(path.startsWith('/api/push/')){const result=pushApi(life,actor,path,method,data);if(result)return result}
  if(path==='/api/confirmations'&&method==='POST')return life.confirm(actor,data);
- if(path==='/api/reviews'&&method==='POST')return life.submitReview(actor,data);
+ if(path==='/api/reviews'&&method==='POST'){if(privacy.isUnavailable(String(data.targetUserId||'')))throw jsonError('Аккаунт участника удалён',409);return life.submitReview(actor,data);}
  if(path==='/api/reviews/mine'&&method==='GET')return {reviews:[...life.reviewsFor(actor.id,new Set()).filter(r=>r.authorId===actor.id),...rows("SELECT v.id,v.ride_id rideId,v.driver_id driverId,v.author_id authorId,v.score,v.text,v.created submittedAt,COALESCE(m.status,'allowed') moderationStatus,'legacy' source FROM reviews v LEFT JOIN legacy_review_moderation m ON m.review_id=v.id WHERE author_id=?",actor.id).map(r=>({...r,isAuto:false,isPublished:r.moderationStatus==='allowed'}))]};
  if(path==='/api/reviews/public'&&method==='GET'){const id=params.get('userId')||actor.id;return {reviews:life.reviewsFor('',new Set([id])),legacy:rows("SELECT id,ride_id rideId,driver_id driverId,author_id authorId,score,text,created FROM reviews WHERE driver_id=? AND COALESCE((SELECT status FROM legacy_review_moderation WHERE review_id=reviews.id),'allowed')='allowed'",id)}}
  if(path==='/api/notifications'&&method==='GET')return {items:state(actor).notifications,unreadCount:q('SELECT COUNT(*) n FROM notifications WHERE recipient_id=? AND read=0',actor.id).n};
@@ -268,10 +320,11 @@ async function handleApi(req,res,path,data){const method=req.method;
    const name=clean(data.name,60),car=clean(data.car,90),phone=clean(data.phone,24);
    if(!name)throw jsonError('Укажите имя');
    if(phone&&!/^[+\d ()-]{7,24}$/.test(phone))throw jsonError('Неверный формат телефона');
-   const photo=Object.hasOwn(data,'photo')?await storePhoto(data.photo,300000):actor.photo||'';
+   const photo=Object.hasOwn(data,'photo')?await storePhoto(data.photo,300000,actor.id):actor.photo||'';
+   requireActor(req);
    run('UPDATE users SET name=?,car=?,phone=?,photo=? WHERE id=?',name,car,phone,photo,actor.id);return {ok:true};
  }
- if(path==='/api/rides'&&method==='POST'){
+ if((path==='/api/rides'||path==='/api/series')&&method==='POST'){
    const retryKey=clean(data.clientKey,80);if(retryKey&&/^[a-zA-Z0-9_-]{10,80}$/.test(retryKey)){const old=q('SELECT ride_id FROM ride_operations WHERE user_id=? AND client_key=?',actor.id,retryKey);if(old)return {id:old.ride_id,repeated:true};}
    const routePlan=roadRouter.prepare(actor,data);const timing=routePlan?null:life.addTiming(data);
    const from=clean(data.from,100),to=clean(data.to,100),date=clean(data.date,10),time=clean(data.time,5),car=clean(data.car,90);
@@ -281,8 +334,10 @@ async function handleApi(req,res,path,data){const method=req.method;
    if(!from||!to||from.toLowerCase()===to.toLowerCase()||!validDate||!validTime||(!timing&&!routePlan&&date<isoDay())||!Number.isInteger(seats)||seats<1||seats>7||(!data.negotiable&&(!Number.isInteger(price)||price<0||price>100000))||!car)throw jsonError('Проверьте маршрут, дату, места, стоимость и автомобиль');
    const key=clean(data.clientKey,80);if(key&&!/^[a-zA-Z0-9_-]{10,80}$/.test(key))throw jsonError('Неверный идентификатор операции');
    if(key){const prev=q('SELECT ride_id FROM ride_operations WHERE user_id=? AND client_key=?',actor.id,key);if(prev)return {id:prev.ride_id,repeated:true};}
-   const photo=await storePhoto(data.photo,120000);
+   const photo=await storePhoto(data.photo,120000,actor.id);
+   if(path==='/api/series')return series.create(actor,data,(date,plan,seriesId)=>{const id=uid();run('INSERT INTO rides(id,driver_id,origin,destination,date,time,seats,price,car,pickup,dropoff,luggage,comment,photo,cancelled,created,series_id,service_date) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,?,?)',id,actor.id,from,to,date,time,seats,price,car,clean(data.pickup,150),clean(data.dropoff,150),clean(data.luggage,60),clean(data.comment,550),photo,now(),seriesId,date);roadRouter.attach(id,actor,plan);return id});
    return transaction(()=>{
+   if(q('SELECT blocked_at FROM users WHERE id=?',actor.id)?.blocked_at)throw jsonError('Аккаунт заблокирован',403);
    // File writes yield the event loop: another request may have committed this key.
    if(key){const prev=q('SELECT ride_id FROM ride_operations WHERE user_id=? AND client_key=?',actor.id,key);if(prev)return {id:prev.ride_id,repeated:true};}
    if(timing)life.addTiming(data);if(routePlan)roadRouter.prepare(actor,data);const id=uid();run('INSERT INTO rides(id,driver_id,origin,destination,date,time,seats,price,car,pickup,dropoff,luggage,comment,photo,cancelled,created) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',id,actor.id,from,to,date,time,seats,price,car,clean(data.pickup,150),clean(data.dropoff,150),clean(data.luggage,60),clean(data.comment,550),photo,0,now());life.attachTiming(id,timing);roadRouter.attach(id,actor,routePlan);if(key)run('INSERT INTO ride_operations VALUES(?,?,?)',actor.id,key,id);return {id};});
@@ -294,7 +349,7 @@ async function handleApi(req,res,path,data){const method=req.method;
      const id=uid();run('INSERT INTO requests(id,ride_id,user_id,status,created) VALUES(?,?,?,?,?)',id,ride.id,actor.id,'pending',now());notify(ride.driver_id,'Новая заявка',`${actor.name} хочет поехать: ${ride.origin} → ${ride.destination}`,ride.id,'booking_created');return {id};});
  }
  const routeEdit=path.match(/^\/api\/rides\/([^/]+)\/route$/);
- if(routeEdit&&method==='POST'){const trip=rideById(routeEdit[1]);if(trip.driver_id!==actor.id)throw jsonError('Изменение маршрута доступно только водителю',403);life.mutable(trip);const reason=clean(data.reason,1000);if(!reason)throw jsonError('Укажите причину изменения маршрута');const plan=roadRouter.prepare(actor,data);if(!plan)throw jsonError('Пересчитайте дорожный маршрут или укажите ручную длительность и часовые пояса');const from=clean(data.from,100),to=clean(data.to,100);if(!from||!to||from===to)throw jsonError('Проверьте маршрут');return transaction(()=>{life.mutable(rideById(trip.id));run('UPDATE rides SET origin=?,destination=?,date=?,time=?,pickup=?,dropoff=? WHERE id=?',from,to,data.date,data.time,clean(data.pickup,150),clean(data.dropoff,150),trip.id);roadRouter.attach(trip.id,actor,plan,reason);for(const person of life.members(trip))life.event(person,'route_changed','route-change:'+uid(),'Маршрут обновлён','Водитель обновил маршрут или время отправления.','/ride/'+trip.id,trip.id);return {id:trip.id}})}
+ if(routeEdit&&method==='POST'){const trip=rideById(routeEdit[1]);if(trip.driver_id!==actor.id)throw jsonError('Изменение маршрута доступно только водителю',403);life.mutable(trip);if(trip.series_id&&q("SELECT id FROM requests WHERE ride_id=? AND status IN ('pending','accepted')",trip.id))throw jsonError('Для этой даты есть заявки. Перенос требует отмены и повторного бронирования.',409);const reason=clean(data.reason,1000);if(!reason)throw jsonError('Укажите причину изменения маршрута');const plan=roadRouter.prepare(actor,data);if(!plan)throw jsonError('Пересчитайте дорожный маршрут или укажите ручную длительность и часовые пояса');const from=clean(data.from,100),to=clean(data.to,100);if(!from||!to||from===to)throw jsonError('Проверьте маршрут');return transaction(()=>{life.mutable(rideById(trip.id));run('UPDATE rides SET origin=?,destination=?,date=?,time=?,pickup=?,dropoff=? WHERE id=?',from,to,data.date,data.time,clean(data.pickup,150),clean(data.dropoff,150),trip.id);roadRouter.attach(trip.id,actor,plan,reason);for(const person of life.members(trip))life.event(person,'route_changed','route-change:'+uid(),'Маршрут обновлён','Водитель обновил маршрут или время отправления.','/ride/'+trip.id,trip.id);return {id:trip.id}})}
  const cancelledRequest=path.match(/^\/api\/requests\/([^/]+)\/cancel$/);
  if(cancelledRequest&&method==='POST'){
   const request=q('SELECT * FROM requests WHERE id=?',cancelledRequest[1]);if(!request)throw jsonError('Заявка не найдена',404);
@@ -315,6 +370,7 @@ async function handleApi(req,res,path,data){const method=req.method;
  m=path.match(/^\/api\/admin\/rides\/([^/]+)\/cancel$/);if(m&&method==='POST'){requireAdmin(actor);return cancelRide(rideById(m[1]),actor,true,data.reason)}
  m=path.match(/^\/api\/notifications\/([^/]+)\/read$/);if(m&&method==='POST'){run('UPDATE notifications SET read=1,read_at=COALESCE(read_at,?) WHERE id=? AND recipient_id=?',now(),m[1],actor.id);return {ok:true}}
  if(path==='/api/messages'&&method==='POST'){
+   if(privacy.isUnavailable(String(data.toId||'')))throw jsonError('Аккаунт участника удалён',409);
    const rideId=clean(data.rideId,100),toId=clean(data.toId,100),txt=clean(data.text,1200);if(!txt||!confirmed(rideId,actor.id,toId))throw jsonError('Чат доступен только участникам подтверждённой поездки',403);
    const id=uid();run('INSERT INTO messages VALUES(?,?,?,?,?,?)',id,rideId,actor.id,toId,txt,now());notify(toId,'Новое сообщение',txt.slice(0,120),rideId,'chat_message','/chat/'+rideId+'/'+actor.id);return {id};
  }
@@ -342,9 +398,11 @@ async function serveStatic(req,res,pathname){
  if(path.startsWith('/uploads/')){
    const name=path.slice('/uploads/'.length);
    if(!/^[a-f0-9]{32}\.(?:jpg|png|webp)$/.test(name))throw jsonError('Файл не найден',404);
+   if(privacy.isErasedMedia(path))throw jsonError('Файл удалён',410);
    const file=join(UPLOADS,name);if(!existsSync(file))throw jsonError('Файл не найден',404);
    const body=await readFile(file),type=name.endsWith('.jpg')?'image/jpeg':name.endsWith('.png')?'image/png':'image/webp';
-   res.writeHead(200,{'content-type':type,'cache-control':'public, max-age=31536000, immutable','x-content-type-options':'nosniff','content-length':body.length});res.end(req.method==='HEAD'?undefined:body);return;
+   if(privacy.isErasedMedia(path))throw jsonError('Файл удалён',410);
+   res.writeHead(200,{'content-type':type,'cache-control':'private, no-store','x-content-type-options':'nosniff','content-length':body.length});res.end(req.method==='HEAD'?undefined:body);return;
  }
  const file=resolve(WEB,'.'+path);
  if(!file.startsWith(WEB+sep))throw jsonError('Доступ запрещён',403);
@@ -358,7 +416,8 @@ async function serveStatic(req,res,pathname){
  if(file===join(WEB,'index.html')){
   const inline=body.toString('utf8').match(/<script>([\s\S]*?)<\/script>/)?.[1];
   const hash=crypto.createHash('sha256').update(inline||'').digest('base64');
-  res.setHeader('content-security-policy',"default-src 'self'; script-src 'self' 'sha256-"+hash+"'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; frame-src https://yandex.ru; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'");
+  const adOrigins=process.env.ADS_ENABLED==='true'&&process.env.ADS_TERMS_CONFIRMED==='true'?String(process.env.ADS_WEB_CSP_ORIGINS||'').split(',').map(s=>s.trim()).filter(s=>{try{const u=new URL(s);return !s.includes('*')&&u.protocol==='https:'&&u.origin===s&&!u.username&&!u.password}catch{return false}}).join(' '):'';
+  res.setHeader('content-security-policy',"default-src 'self'; script-src 'self' 'sha256-"+hash+"' "+adOrigins+"; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: "+adOrigins+"; connect-src 'self' "+adOrigins+"; frame-src https://yandex.ru https://yandex.st https://yastatic.net "+adOrigins+"; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'");
  }
  res.writeHead(200,{'content-type':mime[extname(file)]||'application/octet-stream','x-content-type-options':'nosniff','cache-control':extname(file)==='.html'?'no-store':'no-cache','content-length':body.length});
  res.end(req.method==='HEAD'?undefined:body);
@@ -406,7 +465,7 @@ server.maxRequestsPerSocket=1000;
 for(const signal of ['SIGTERM','SIGINT'])process.on(signal,()=>{
  if(stopping)return;stopping=true;clearInterval(lifecycleTimer);
  const deadline=setTimeout(()=>process.exit(1),15000);deadline.unref();
- server.close(async()=>{if(pushInFlight)await pushInFlight;database.close();clearTimeout(deadline);process.exit(0)});
+ server.close(async()=>{if(pushInFlight)await pushInFlight;busCache.close();database.close();clearTimeout(deadline);process.exit(0)});
  server.closeIdleConnections();
 });
 // Expired credentials are maintenance data, never user records.

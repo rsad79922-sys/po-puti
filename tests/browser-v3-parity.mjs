@@ -1,7 +1,9 @@
 // Real shared API/UI; Android WebView bridge is simulated, not a physical-device claim.
 import assert from 'node:assert/strict';import {chromium,webkit} from 'playwright';import {DatabaseSync} from 'node:sqlite';import {randomUUID} from 'node:crypto';import {spawnSync} from 'node:child_process';
 import {isolatedServer} from './helpers/server.mjs';
-const app=await isolatedServer({APP_ORIGINS:'https://localhost'});let browser,db;
+import {roadFixture} from './helpers/road.mjs';
+const road=await roadFixture();
+const app=await isolatedServer({...road.env,APP_ORIGINS:'https://localhost'});let browser,db;
 try{
  const engine=process.env.BROWSER_ENGINE||'chromium';browser=await (engine==='webkit'?webkit:chromium).launch({headless:true,...(engine==='chromium'?{...(process.env.CHROMIUM_PATH?{executablePath:process.env.CHROMIUM_PATH}:{}),args:['--no-sandbox']}: {})});
  const errors=[];let publication;
@@ -21,7 +23,7 @@ try{
  const driverId=nativeState.currentUserId,passengerId=pwaState.currentUserId;
  await native.goto(app.base+'/#/publish');await native.locator('#pub-from').fill('Москва');await native.locator('#pub-to').fill('Тверь');
  const date=new Date(Date.now()+3*86400000).toISOString().slice(0,10);
- await native.locator('#pub-date').fill(date);await native.locator('#pub-time').fill('21:00');await native.locator('[name=departureTimeZone]').selectOption('Europe/Moscow');await native.locator('[name=estimatedDurationMinutes]').fill('120');await native.locator('#pub-price').fill('500');await native.locator('#pub-car').fill('Lada');
+ await native.locator('#pub-date').fill(date);await native.locator('#pub-time').fill('21:00');await native.waitForFunction(()=>!!db.draft?.routeQuoteId);await native.locator('#pub-price').fill('500');await native.locator('#pub-car').fill('Lada');
  await native.locator('#publish-form [type=submit]').click();await native.locator('[data-action=publish-confirm]').click();await native.waitForURL('**/#/ride/*');
  const rideId=new URL(native.url()).hash.split('/').at(-1);assert.equal(publication.departureTimeZone,'Europe/Moscow');assert.equal(publication.estimatedDurationMinutes,120);
  await pwa.reload();await pwa.locator('#search-from').fill('Москва');await pwa.locator('#search-to').fill('Тверь');await pwa.locator('#search-date').fill(date);await pwa.locator('#search-form [type=submit]').click();await pwa.locator('.trip-card').click();await pwa.locator('[data-action=apply]').click();await pwa.locator('[data-action=apply-confirm]').click();await pwa.locator('.pill.pending').waitFor();
@@ -52,4 +54,4 @@ try{
  await moderator.locator('[data-v3-action=admin-section][data-section=audit]').click();await moderator.locator('.admin-json').filter({hasText:'Проверка модерации'}).waitFor();
  assert.deepEqual(errors,[]);
  console.log('PASS ('+engine+'): shared native-bridge/PWA UI and DB, explicit timezone/ETA, post-departure archive, immediate Yes review, No reason/no rating, immutable hidden review, reminder and real admin moderation/audit');
-}finally{if(db)db.close();if(browser)await browser.close();await app.stop()}
+}finally{if(db)db.close();if(browser)await browser.close();await app.stop();await road.stop()}

@@ -5,8 +5,8 @@
   "description": "Рабочий локальный прототип приложения По пути для Android и PWA",
   "scripts": {
     "serve": "http-server www -p 8080 -c-1",
-    "android:add": "npx cap add android",
-    "android:sync": "npx cap sync android",
+    "android:add": "npx cap add android && node scripts/prepare-android.mjs",
+    "android:sync": "node scripts/prepare-android.mjs && npx cap sync android",
     "android:open": "npx cap open android",
     "server": "node server/server.mjs",
     "check": "node scripts/check.mjs",
@@ -20,6 +20,7 @@
     "@capacitor/core": "^7.0.0",
     "@capacitor/push-notifications": "7.0.7",
     "google-auth-library": "11.3.4",
+    "sharp": "0.35.5",
     "tz-lookup": "6.1.25",
     "web-push": "4.0.0"
   },

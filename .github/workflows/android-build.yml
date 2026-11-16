@@ -2,7 +2,7 @@ name: Android PWA shared-backend build
 on:
   pull_request:
     branches: [main]
-    paths: [www/**, server/**, tests/native-android/**, capacitor.config.json, package.json, package-lock.json, .github/workflows/android-build.yml]
+    paths: [www/**, server/**, tests/native-android/**, native/**, scripts/prepare-android.mjs, capacitor.config.json, package.json, package-lock.json, .github/workflows/android-build.yml]
   workflow_dispatch:
   workflow_call:
     secrets:
@@ -32,6 +32,7 @@ jobs:
           FIREBASE_ANDROID_CONFIG_JSON: ${{ secrets.FIREBASE_ANDROID_CONFIG_JSON }}
         run: |
           npx cap add android
+          node scripts/prepare-android.mjs
           if [ -n "$FIREBASE_ANDROID_CONFIG_JSON" ]; then
             printf '%s' "$FIREBASE_ANDROID_CONFIG_JSON" > android/app/google-services.json
           fi
@@ -41,6 +42,12 @@ jobs:
           grep -Fq "https://vputipoputka.ru" android/app/src/main/assets/public/config.js
       - name: Build Android debug APK
         run: cd android && ./gradlew assembleDebug --no-daemon
+      - name: Build unsigned release configuration (no signing or store upload)
+        run: cd android && ./gradlew assembleRelease --no-daemon
+      - name: Inspect merged permissions, privacy and release configuration
+        run: |
+          python3 tests/native-android/verify_manifest.py debug
+          python3 tests/native-android/verify_manifest.py release
       - name: Verify byte-identical PWA assets inside the compiled APK
         run: python3 tests/native-android/verify_assets.py
       - name: Enable KVM for the disposable Android emulator
@@ -62,6 +69,27 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: po-puti-android-test-reports
+          path: android/app/build/reports/androidTests/connected/
+          if-no-files-found: ignore
+          retention-days: 7
+      - name: Clear disposable emulator reports before the AOSP run
+        run: rm -rf android/app/build/reports/androidTests/connected android/app/build/outputs/androidTest-results/connected
+      - name: Launch the same APK on AOSP without Google services
+        uses: reactivecircus/android-emulator-runner@4c44018e59b437e86cdfc41da381398f93ed8808 # v2
+        with:
+          api-level: 30
+          target: default
+          arch: x86_64
+          profile: pixel_2
+          disable-animations: true
+          script: |
+            python3 -c 'import subprocess; packages=subprocess.check_output(["adb","shell","pm","list","packages","com.google.android.gms"]).decode(); assert "package:" not in packages, "Expected an AOSP device without GMS"'
+            cd android && ./gradlew :app:connectedDebugAndroidTest --no-daemon -Pandroid.testInstrumentationRunnerArguments.class=ru.poputi.app.SharedUiSmokeTest
+      - name: Save AOSP startup and bridge test reports (not live push evidence)
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: po-puti-android-aosp-test-reports
           path: android/app/build/reports/androidTests/connected/
           if-no-files-found: ignore
           retention-days: 7

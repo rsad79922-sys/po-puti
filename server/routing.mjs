@@ -43,6 +43,7 @@ export function routing(db,{env=process.env,clock=Date.now,fetcher=fetch}={}){
  }
  async function estimate(actor,data){const identity=routeIdentity(data),points=identity.points;const depZone=points[0].timeZone,destZone=points.at(-1).timeZone;const departure=localToUTC(identity.date,identity.time,depZone,data.departureOffset);if(departure.at<=clock())throw fail('Отправление должно быть в будущем');const result=await road(points,departure.at);
   if(!result)return {available:false,manualAllowed:true,reason:providers.length?'Дорожный маршрут не получен. Повторите расчёт или укажите длительность вручную.':'Дорожный маршрутизатор не подключён. Укажите длительность по дороге вручную.',departureTimeZone:depZone,destinationTimeZone:destZone};
+  if(get('SELECT blocked_at FROM users WHERE id=?',actor.id)?.blocked_at)throw fail('Аккаунт недоступен',401);
   const value={...result,points,departureAt:departure.at,departureOffset:departure.offset,departureTimeZone:depZone,destinationTimeZone:destZone,arrivalAt:departure.at+result.durationMinutes*60000};const id=randomUUID();run('INSERT INTO route_quotes VALUES(?,?,?,?,?,?)',id,actor.id,digest(identity),JSON.stringify(value),clock(),clock()+30*60000);
   return {available:true,routeQuoteId:id,...value,departureLocal:zonedTime(value.departureAt,depZone),arrivalLocal:zonedTime(value.arrivalAt,destZone)};
  }

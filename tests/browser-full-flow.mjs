@@ -6,11 +6,13 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {chromium,webkit} from 'playwright';
 
+import {roadFixture} from './helpers/road.mjs';
+const road=await roadFixture(5400);
 const dir=await mkdtemp(join(tmpdir(),'po-puti-browser-'));
 const port=20000+Math.floor(Math.random()*30000);
 const origin='http://127.0.0.1:'+port;
 const server=spawn(process.execPath,['server/server.mjs'],{
- env:{...process.env,DATA_DIR:dir,HOST:'127.0.0.1',PORT:String(port),APP_ORIGINS:origin,ADMIN_USERNAME:'',ADMIN_PASSWORD:''},
+ env:{...process.env,...road.env,DATA_DIR:dir,HOST:'127.0.0.1',PORT:String(port),APP_ORIGINS:origin,ADMIN_USERNAME:'',ADMIN_PASSWORD:''},
  stdio:['ignore','pipe','pipe']
 });
 let browser,output='';
@@ -51,7 +53,8 @@ try{
  await driver.locator('#pub-seats').selectOption('1');
  await driver.locator('#pub-price').fill('900');
  await driver.locator('#pub-car').fill('Lada');
- await driver.locator('[name=estimatedDurationMinutes]').fill('90');
+ await driver.waitForFunction(()=>!!db.draft?.routeQuoteId);
+ assert.equal(await driver.locator('[name=estimatedDurationMinutes]').count(),0,'manual duration removed');
  await driver.locator('#publish-form button[type="submit"]').click();
  await driver.locator('[data-action="publish-confirm"]').click();
  await driver.waitForURL('**/#/ride/*');
@@ -91,5 +94,5 @@ try{
  if(browser)await browser.close();
  server.kill('SIGTERM');
  await new Promise(resolve=>{if(server.exitCode!==null||server.signalCode!==null)return resolve();server.once('exit',resolve)});
- await rm(dir,{recursive:true,force:true});
+ await rm(dir,{recursive:true,force:true});await road.stop();
 }

@@ -30,8 +30,13 @@ jobs:
     uses: ./.github/workflows/android-build.yml
     secrets:
       FIREBASE_ANDROID_CONFIG_JSON: ${{ secrets.FIREBASE_ANDROID_CONFIG_JSON }}
-  release:
+  rasp:
     needs: [verify, android]
+    uses: ./.github/workflows/check-yandex-rasp.yml
+    secrets:
+      YANDEX_RASP_API_KEY: ${{ secrets.YANDEX_RASP_API_KEY }}
+  release:
+    needs: [verify, android, rasp]
     if: github.ref == 'refs/heads/main' && ((github.event_name == 'push' && vars.POPUTI_AUTO_DEPLOY != 'false') || (github.event_name == 'workflow_dispatch' && inputs.confirmation == 'publish-vputipoputka.ru'))
     runs-on: ubuntu-24.04
     environment: production
@@ -81,6 +86,36 @@ jobs:
             -o UserKnownHostsFile="$ssh_dir/known_hosts" \
             -o ConnectTimeout=12 -p "$DEPLOY_PORT" \
             "$DEPLOY_USER@$DEPLOY_HOST" "$remote_command" < "$release_script"
+      - name: Install existing Timetables secret through pinned SSH stdin
+        shell: bash
+        env:
+          DEPLOY_HOST: ${{ secrets.POPUTI_DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.POPUTI_DEPLOY_USER }}
+          DEPLOY_KEY: ${{ secrets.POPUTI_DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.POPUTI_DEPLOY_KNOWN_HOSTS }}
+          DEPLOY_PORT: ${{ secrets.POPUTI_DEPLOY_PORT }}
+          YANDEX_RASP_API_KEY: ${{ secrets.YANDEX_RASP_API_KEY }}
+          RASP_DAILY_LIMIT: ${{ vars.RASP_DAILY_LIMIT || '450' }}
+          RASP_CACHE_SECONDS: ${{ vars.RASP_CACHE_SECONDS || '1800' }}
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          if [ -z "$YANDEX_RASP_API_KEY" ]; then
+            echo 'No Timetables secret supplied; existing server configuration preserved.'
+            exit 0
+          fi
+          ssh_dir="$RUNNER_TEMP/timetables-ssh"
+          trap 'rm -rf "$ssh_dir"' EXIT
+          bash deploy/prepare-ssh.sh "$ssh_dir"
+          port="${DEPLOY_PORT:-22}"
+          [[ "$port" =~ ^[0-9]{1,5}$ ]] || exit 2
+          remote_command='sudo -n node /opt/po-puti/deploy/install-rasp-settings.mjs'
+          if [[ "$DEPLOY_USER" = root ]]; then remote_command='node /opt/po-puti/deploy/install-rasp-settings.mjs'; fi
+          node scripts/rasp-settings-payload.mjs | ssh -i "$ssh_dir/key" -p "$port" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$ssh_dir/known_hosts" -o ConnectTimeout=12 \
+            "$DEPLOY_USER@$DEPLOY_HOST" "$remote_command"
       - name: Verify public production assets from external GitHub runner
         run: |
           set -euo pipefail

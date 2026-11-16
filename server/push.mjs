@@ -9,22 +9,39 @@ export function validWebEndpoint(value){
  if(url.protocol!=='https:'||url.username||url.password||url.port&&url.port!=='443'||!domains.some(d=>url.hostname===d||url.hostname.endsWith('.'+d)))throw fail('Неизвестный сервер Web Push');
  return url.href;
 }
-export function createPush({env=process.env,sendWeb,sendAndroid}={}){
+export function createPush({env=process.env,sendWeb,sendAndroid,sendRustore,fetcher=fetch}={}){
  const webReady=!!(env.VAPID_PUBLIC_KEY&&env.VAPID_PRIVATE_KEY&&env.VAPID_SUBJECT);
  const androidReady=!!sendAndroid||!!(env.FCM_PROJECT_ID&&(env.FCM_SERVICE_ACCOUNT_JSON||env.GOOGLE_APPLICATION_CREDENTIALS));
+ const rustoreReady=!!sendRustore||!!(/^[A-Za-z0-9_-]{1,200}$/.test(env.RUSTORE_PUSH_PROJECT_ID||'')&&env.RUSTORE_PUSH_SERVICE_TOKEN);
  let auth;
  if(androidReady&&!sendAndroid){
   const config=env.FCM_SERVICE_ACCOUNT_JSON;const credentials=JSON.parse(config?.trim().startsWith('{')?config:readFileSync(config||env.GOOGLE_APPLICATION_CREDENTIALS,'utf8'));
   if(credentials.type!=='service_account'||!String(credentials.client_email||'').endsWith('.gserviceaccount.com')||!String(credentials.private_key||'').includes('BEGIN PRIVATE KEY')||credentials.project_id!==env.FCM_PROJECT_ID)throw Error('Invalid FCM service-account configuration');
   auth=new GoogleAuth({authClient:new JWT({email:credentials.client_email,key:credentials.private_key,scopes:['https://www.googleapis.com/auth/firebase.messaging']})});
  }
- const available=()=>({web:webReady,android:androidReady,vapidPublicKey:webReady?env.VAPID_PUBLIC_KEY:null});
+ const available=()=>({web:webReady,android:androidReady,rustore:rustoreReady,androidProviders:{fcm:androidReady,rustore:rustoreReady},vapidPublicKey:webReady?env.VAPID_PUBLIC_KEY:null});
  async function deliver(sub,payload){
   if(sub.platform==='web'){
    if(!webReady&&!sendWeb)throw Object.assign(Error('Push not configured'),{retryable:false});
    const sender=sendWeb||((s,p)=>webpush.sendNotification(s,JSON.stringify(p),{vapidDetails:{subject:env.VAPID_SUBJECT,publicKey:env.VAPID_PUBLIC_KEY,privateKey:env.VAPID_PRIVATE_KEY},TTL:86400,timeout:8000}));
    return sender({endpoint:sub.address,keys:JSON.parse(sub.keys_json)},payload);
   }
+  const provider=JSON.parse(sub.keys_json||'{}').provider||'fcm';
+  if(provider==='rustore'){
+   if(!rustoreReady)throw Object.assign(Error('RuStore push not configured'),{retryable:false});
+   if(!sub.address.startsWith('rustore:'))throw Object.assign(Error('Invalid RuStore subscription'),{retryable:false});
+   const token=sub.address.slice(8);if(sendRustore)return sendRustore(token,payload);
+   try{
+    const response=await fetcher('https://vkpns.rustore.ru/v1/projects/'+encodeURIComponent(env.RUSTORE_PUSH_PROJECT_ID)+'/messages:send',{
+     method:'POST',headers:{'content-type':'application/json',Authorization:'Bearer '+env.RUSTORE_PUSH_SERVICE_TOKEN},redirect:'error',signal:AbortSignal.timeout(10000),
+     body:JSON.stringify({message:{token,notification:{title:payload.title,body:payload.body},data:{path:payload.path,notificationId:payload.notificationId},android:{ttl:'86400s',notification:{channel_id:'trip_updates'}}}})
+    });
+    await response.body?.cancel();
+    if(!response.ok)throw Object.assign(Error('RuStore delivery failed'),{statusCode:response.status});
+    return;
+   }catch(error){throw Object.assign(Error('RuStore delivery failed'),{statusCode:error.statusCode||503})}
+  }
+  if(provider!=='fcm')throw Object.assign(Error('Unknown native push provider'),{retryable:false});
   if(!androidReady&&!sendAndroid)throw Object.assign(Error('Native push not configured'),{retryable:false});
   if(sendAndroid)return sendAndroid(sub.address,payload);
   const client=await auth.getClient();
@@ -39,13 +56,15 @@ export function pushApi(l,actor,path,method,data){
  if(path==='/api/push/subscribe'&&method==='POST')return tx(()=>{
   const device=String(data.deviceId||'');if(!/^[a-zA-Z0-9_-]{10,100}$/.test(device))throw fail('Неверный идентификатор устройства');
   if(!['web','android'].includes(data.platform))throw fail('Неверная платформа');
-  if(!l.pushAvailable()[data.platform])throw fail('Push ещё не настроен на сервере',503);
+  const provider=data.platform==='android'?String(data.provider||'fcm'):null;
+  if(provider&&!['fcm','rustore'].includes(provider))throw fail('Неверный транспорт уведомлений');
+  if(!(provider==='rustore'?l.pushAvailable().rustore:l.pushAvailable()[data.platform]))throw fail('Push ещё не настроен на сервере',503);
   let address,keys={};
   if(data.platform==='web'){
    address=validWebEndpoint(data.subscription?.endpoint);
    keys=data.subscription?.keys||{};
    if(!/^[a-zA-Z0-9_-]{80,100}={0,2}$/.test(keys.p256dh||'')||!/^[a-zA-Z0-9_-]{20,30}={0,2}$/.test(keys.auth||''))throw fail('Некорректные ключи Web Push');
-  }else{address=String(data.token||'');if(!/^[A-Za-z0-9_:\-.]{30,4096}$/.test(address))throw fail('Неверный FCM token')}
+  }else{address=String(data.token||'');if(!/^[A-Za-z0-9_:\-.]{30,4096}$/.test(address))throw fail('Неверный push token');keys={provider};if(provider==='rustore')address='rustore:'+address;}
   const other=get('SELECT * FROM push_subscriptions WHERE address=?',address);
   if(other&&other.user_id!==actor.id&&other.active)throw fail('Устройство связано с другой сессией. Сначала отключите уведомления в ней.',409);
   const own=get('SELECT * FROM push_subscriptions WHERE user_id=? AND device_id=? AND platform=?',actor.id,device,data.platform);

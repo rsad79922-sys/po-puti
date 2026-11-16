@@ -76,9 +76,11 @@ export function lifecycle(db,{clock=Date.now,pushAvailable=()=>({web:false,andro
  const targets=(r,user)=>user===r.driver_id?members(r).filter(id=>id!==user):members(r).includes(user)?[r.driver_id]:[];
  const answer=(id,user)=>get('SELECT * FROM ride_confirmations WHERE ride_id=? AND user_id=?',id,user);
  const eligible=(r,author,target)=>!r.cancelled&&r.outcome==='completed'&&!r.moderation_blocked&&answer(r.id,author)?.answer==='yes'&&answer(r.id,target)?.answer==='yes';
- function tickTransaction(){
+ function tickTransaction(onlyId){
   const t=clock();
-  for(const r of all('SELECT * FROM rides')){
+  const queued=!!get("SELECT name FROM sqlite_master WHERE name='lifecycle_due'");
+  const selected=onlyId?all('SELECT * FROM rides WHERE id=?',onlyId):queued?all('SELECT r.* FROM lifecycle_due d JOIN rides r ON r.id=d.ride_id WHERE d.next_run_at<=? ORDER BY d.next_run_at LIMIT 100',t):all('SELECT * FROM rides');
+  for(const r of selected){
    if(t>=departure(r))run("UPDATE requests SET expired_at=? WHERE ride_id=? AND status='pending' AND expired_at IS NULL",t,r.id);
    const result=outcome(r,t);if(result!==r.outcome){run('UPDATE rides SET outcome=? WHERE id=?',result,r.id);r.outcome=result}
    if(!r.cancelled&&r.estimated_arrival_at&&t>=r.estimated_arrival_at+HOUR){
@@ -102,6 +104,7 @@ export function lifecycle(db,{clock=Date.now,pushAvailable=()=>({web:false,andro
      event(review.target_user_id,'review_published','review-published:'+review.id,'Опубликован отзыв','В вашем профиле появился новый отзыв.','/reviews/'+review.target_user_id,r.id);
     }
    }
+   if(queued){const dates=[departure(r),r.estimated_arrival_at&&r.estimated_arrival_at+HOUR,r.estimated_arrival_at&&r.estimated_arrival_at+HOUR+14*DAY,...all('SELECT responded_at FROM ride_confirmations WHERE ride_id=?',r.id).flatMap(a=>[a.responded_at+DAY,a.responded_at+7*DAY]),...all("SELECT visible_after_at FROM pair_reviews WHERE ride_id=? AND published_at IS NULL AND moderation_status='allowed'",r.id).map(v=>v.visible_after_at)].filter(v=>Number.isFinite(v)&&v>t);run('INSERT INTO lifecycle_due VALUES(?,?) ON CONFLICT(ride_id) DO UPDATE SET next_run_at=excluded.next_run_at',r.id,dates.length?Math.min(...dates):8640000000000000);}
   }
   run("INSERT INTO background_state(name,last_started_at,last_finished_at,last_error) VALUES('lifecycle',?,?,'') ON CONFLICT(name) DO UPDATE SET last_started_at=excluded.last_started_at,last_finished_at=excluded.last_finished_at,last_error=''",t,t);
  }
@@ -111,7 +114,7 @@ export function lifecycle(db,{clock=Date.now,pushAvailable=()=>({web:false,andro
  function statusLabel(r,user){const d=describe(r);if(d.phase==='cancelled')return 'Отменена';if(d.phase==='scheduled')return 'Поездка запланирована';if(d.phase==='in_progress')return 'Поездка в пути (расчётно)';const a=user?answer(r.id,user):null;const canConfirm=user&&members(r).includes(user)&&r.estimated_arrival_at&&clock()>=r.estimated_arrival_at+HOUR&&clock()<r.estimated_arrival_at+HOUR+14*DAY&&!a;if(canConfirm)return 'Подтвердите, состоялась ли поездка';if(r.outcome==='pending_confirmation')return !r.estimated_arrival_at?'Расчёт прибытия отсутствует':clock()<r.estimated_arrival_at+HOUR?'Ожидание подтверждения после прибытия':'Ожидание ответов участников';return ({completed:'Состоялась',not_held:'Не состоялась',disputed:'Спорная',unverified:'Не подтверждена'})[r.outcome]||'Ожидание ответов участников'}
  function participation(r,user){const a=answer(r.id,user),existing=all('SELECT * FROM pair_reviews WHERE ride_id=? AND author_id=?',r.id,user);return {rideId:r.id,statusLabel:statusLabel(r,user),answer:a?.answer||null,respondedAt:a?.responded_at||null,reason:a?.reason||'',canConfirm:members(r).includes(user)&&!r.cancelled&&!!r.estimated_arrival_at&&clock()>=r.estimated_arrival_at+HOUR&&clock()<r.estimated_arrival_at+HOUR+14*DAY&&!a,reviewTargets:a?.answer==='yes'?targets(r,user).map(target=>({userId:target,state:existing.some(x=>x.target_user_id===target)?'submitted':clock()>=a.responded_at+7*DAY?'closed':'pending_by_user',autoRatingDueAt:a.responded_at+7*DAY})):[]}}
  function submitReview(actor,data){return tx(()=>{
-  tickTransaction();const r=ride(String(data.rideId||'')),target=String(data.targetUserId||r.driver_id);
+  tickTransaction(String(data.rideId||''));const r=ride(String(data.rideId||'')),target=String(data.targetUserId||r.driver_id);
   if(!targets(r,actor.id).includes(target)||!members(r).includes(actor.id))throw fail('Отзыв доступен только подтверждённым участникам',403);
   const previous=get('SELECT * FROM pair_reviews WHERE ride_id=? AND author_id=? AND target_user_id=?',r.id,actor.id,target);
   if(previous){if(previous.source==='automatic')throw fail('Срок отзыва закрыт: создана системная оценка',409);return {id:previous.id,repeated:true,review:publicReview(previous)}}
@@ -123,7 +126,7 @@ export function lifecycle(db,{clock=Date.now,pushAvailable=()=>({web:false,andro
   return {id,review:publicReview(get('SELECT * FROM pair_reviews WHERE id=?',id)),message:'Отзыв сохранён. Он станет доступен другим пользователям через 7 дней'};
  })}
  function confirm(actor,data){return tx(()=>{
-  tickTransaction();const r=ride(String(data.rideId||''));if(!members(r).includes(actor.id))throw fail('Вы не подтверждённый участник',403);
+  tickTransaction(String(data.rideId||''));const r=ride(String(data.rideId||''));if(!members(r).includes(actor.id))throw fail('Вы не подтверждённый участник',403);
   const old=answer(r.id,actor.id);if(old){if(old.answer!==data.answer)throw fail('Окончательный ответ уже сохранён',409);return {participation:participation(r,actor.id),openReview:old.answer==='yes'}}
   if(!r.estimated_arrival_at||r.cancelled||clock()<r.estimated_arrival_at+HOUR||clock()>=r.estimated_arrival_at+HOUR+14*DAY)throw fail('Подтверждение сейчас недоступно',409);
   if(!['yes','no'].includes(data.answer))throw fail('Выберите «Да» или «Нет»');
@@ -131,7 +134,7 @@ export function lifecycle(db,{clock=Date.now,pushAvailable=()=>({web:false,andro
   const opposite=get('SELECT user_id FROM ride_confirmations WHERE ride_id=? AND answer<>?',r.id,data.answer);
   run('INSERT INTO ride_confirmations VALUES(?,?,?,?,?)',r.id,actor.id,data.answer,clock(),reason);
   if(r.outcome_override&&opposite)run('UPDATE rides SET outcome_override=NULL WHERE id=?',r.id); // New contradictory evidence reopens an already moderated outcome.
-  tickTransaction();return {participation:participation(ride(r.id),actor.id),openReview:data.answer==='yes'};
+  tickTransaction(r.id);return {participation:participation(ride(r.id),actor.id),openReview:data.answer==='yes'};
  })}
  function addTiming(data){
   if(data.departureAt===undefined&&data.estimatedDurationMinutes===undefined)return null; // old client: explicit legacy unknown ETA

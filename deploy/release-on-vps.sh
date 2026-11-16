@@ -82,9 +82,13 @@ try{
 }
 JS
 
-# Images are append-only: capture them AFTER the SQLite snapshot so every
-# committed photo reference in that snapshot is included. Older releases may
-# not have an uploads directory yet.
+# Keep an erasure ledger alongside the snapshot; recovery must additionally use
+# the newest ledger retained in DATA_DIR, never roll it back with the code.
+if [[ -f /var/lib/po-puti/privacy-erasure.jsonl ]]; then
+ cp -p /var/lib/po-puti/privacy-erasure.jsonl "$BACKUP_ROOT/po-puti-$SHORT_SHA-privacy-erasure-$(date -u +%Y%m%dT%H%M%SZ).jsonl"
+fi
+# Images may now be removed only by explicit account erasure. A missing image in
+# an old DB snapshot must be reconciled using the latest ledger during recovery.
 if [[ -d "$UPLOADS" ]]; then
   tar -C /var/lib/po-puti -czf "$UPLOAD_BACKUP" uploads
 else

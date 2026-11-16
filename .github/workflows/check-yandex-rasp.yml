@@ -1,0 +1,36 @@
+name: Check private Yandex Timetables integration
+on:
+  workflow_dispatch:
+  workflow_call:
+    secrets:
+      YANDEX_RASP_API_KEY:
+        required: false
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - name: Authenticate using the existing secret without exporting it
+        env:
+          YANDEX_RASP_API_KEY: ${{ secrets.YANDEX_RASP_API_KEY }}
+        run: |
+          set +x
+          if [ -z "$YANDEX_RASP_API_KEY" ]; then
+            echo 'RASP_SECRET_NOT_AVAILABLE: integration check skipped; no key requested or disclosed.'
+            exit 0
+          fi
+          node scripts/probe-timetables.mjs
+      - name: Install runtime dependencies for isolated public-city smoke probe
+        run: npm ci --omit=dev --ignore-scripts
+      - name: Verify real catalog, public-city search and attribution
+        env:
+          YANDEX_RASP_API_KEY: ${{ secrets.YANDEX_RASP_API_KEY }}
+        run: |
+          set +x
+          if [ -n "$YANDEX_RASP_API_KEY" ]; then node scripts/probe-timetables-live.mjs; fi

@@ -8,6 +8,7 @@ import {mkdtemp,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import crypto from 'node:crypto';
+import sharp from 'sharp';
 
 const temp=await mkdtemp(join(tmpdir(),'po-puti-photos-'));
 const port=20000+Math.floor(Math.random()*30000);
@@ -23,7 +24,8 @@ async function call(path,method='GET',data,token){
  return {status:response.status,data:await response.json()};
 }
 function expectOk(result,label){assert.equal(result.status,200,label+': '+JSON.stringify(result.data));return result.data}
-const base64=Buffer.from([0xff,0xd8,0xff,0xe0,0x00,0x10,0x4a,0x46,0x49,0x46]).toString('base64');
+const original=await sharp({create:{width:2,height:2,channels:3,background:'#43caba'}}).jpeg().withExif({IFD0:{Make:'private-camera'}}).toBuffer();
+const base64=original.toString('base64');
 const photo='data:image/jpeg;base64,'+base64;
 try{
  let ready=false;
@@ -42,12 +44,14 @@ try{
  assert.match(avatarUrl,/^\/uploads\/[a-f0-9]{32}\.jpg$/,'avatar must be stored as a file URL');
  const avatarResponse=await fetch('http://127.0.0.1:'+port+avatarUrl);
  assert.equal(avatarResponse.status,200);
- assert.equal((await avatarResponse.arrayBuffer()).byteLength,10,'avatar file bytes must be served');
+ const served=Buffer.from(await avatarResponse.arrayBuffer());const metadata=await sharp(served).metadata();assert.equal(metadata.width,2);assert.equal(metadata.exif,undefined,'EXIF must not expose camera/GPS metadata');
+ assert.equal((await call('/profile','POST',{name:'Фотограф',photo:'data:image/jpeg;base64,'+Buffer.from([255,216,255,224,0,16,74,70,73,70]).toString('base64')},token)).status,400,'truncated JPEG with valid signature must be rejected');
  const date=new Date(Date.now()+7*86400000).toISOString().slice(0,10);
  const rideData={from:'Ижевск',to:'Казань',date,time:'12:30',seats:2,price:950,car:'Lada',photo};
  const ride=expectOk(await call('/rides','POST',rideData,token),'publish with photo');
  state=expectOk(await call('/state','GET',undefined,token),'reload');
  const ridePhoto=state.rides.find(r=>r.id===ride.id).photo;
+ assert.equal(ridePhoto,avatarUrl,'same owner reuses one normalized image file');
  assert.match(ridePhoto,/^\/uploads\/[a-f0-9]{32}\.jpg$/,'ride photo must be returned as URL, never Base64');
  assert.equal(JSON.stringify(state).includes('data:image'),false,'/state must not contain Base64 photos');
  assert.equal((await call('/profile','POST',{name:'Фотограф',photo:'data:image/svg+xml;base64,PHN2Zy8+'},token)).status,400,'SVG must be rejected');
