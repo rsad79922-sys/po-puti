@@ -8,6 +8,8 @@ on:
     secrets:
       FIREBASE_ANDROID_CONFIG_JSON:
         required: false
+      RUSTORE_PUSH_PROJECT_ID:
+        required: false
 permissions:
   contents: read
 jobs:
@@ -30,6 +32,7 @@ jobs:
       - name: Generate the native Android wrapper and synchronize shared web app
         env:
           FIREBASE_ANDROID_CONFIG_JSON: ${{ secrets.FIREBASE_ANDROID_CONFIG_JSON }}
+          RUSTORE_PUSH_PROJECT_ID: ${{ secrets.RUSTORE_PUSH_PROJECT_ID }}
         run: |
           npx cap add android
           node scripts/prepare-android.mjs
@@ -37,11 +40,12 @@ jobs:
             printf '%s' "$FIREBASE_ANDROID_CONFIG_JSON" > android/app/google-services.json
           fi
           install -D -m 0644 tests/native-android/SharedUiSmokeTest.java android/app/src/androidTest/java/ru/poputi/app/SharedUiSmokeTest.java
+          install -D -m 0644 tests/native-android/PushPolicyTest.java android/app/src/test/java/ru/poputi/app/PushPolicyTest.java
           npx cap sync android
           test -e android/app/src/main/assets/public/config.js
           grep -Fq "https://vputipoputka.ru" android/app/src/main/assets/public/config.js
       - name: Build Android debug APK
-        run: cd android && ./gradlew assembleDebug --no-daemon
+        run: cd android && ./gradlew assembleDebug :app:testDebugUnitTest --no-daemon
       - name: Build unsigned release configuration (no signing or store upload)
         run: cd android && ./gradlew assembleRelease --no-daemon
       - name: Inspect merged permissions, privacy and release configuration

@@ -34,7 +34,7 @@ export function createPush({env=process.env,sendWeb,sendAndroid,sendRustore,fetc
    try{
     const response=await fetcher('https://vkpns.rustore.ru/v1/projects/'+encodeURIComponent(env.RUSTORE_PUSH_PROJECT_ID)+'/messages:send',{
      method:'POST',headers:{'content-type':'application/json',Authorization:'Bearer '+env.RUSTORE_PUSH_SERVICE_TOKEN},redirect:'error',signal:AbortSignal.timeout(10000),
-     body:JSON.stringify({message:{token,notification:{title:payload.title,body:payload.body},data:{path:payload.path,notificationId:payload.notificationId},android:{ttl:'86400s',notification:{channel_id:'trip_updates'}}}})
+     body:JSON.stringify({message:{token,data:{path:payload.path,notificationId:payload.notificationId,recipientId:payload.recipientId},android:{ttl:'86400s'}}})
     });
     await response.body?.cancel();
     if(!response.ok)throw Object.assign(Error('RuStore delivery failed'),{statusCode:response.status});
@@ -91,7 +91,7 @@ export async function processPush(l,transport,{limit=25,shouldStop=()=>false}={}
   if(!sub?.active||!note||sub.user_id!==note.recipient_id||get('SELECT blocked_at FROM users WHERE id=?',sub.user_id)?.blocked_at){run("UPDATE push_outbox SET status='cancelled' WHERE id=?",job.id);continue}
   const badge=get('SELECT COUNT(*) n FROM notifications WHERE recipient_id=? AND read=0',sub.user_id).n;
   const titles={ride_confirmation:'Поездка состоялась?',review_published:'Опубликован отзыв',review_reminder:'Оцените поездку',complaint_result:'Обращение рассмотрено',push_test:'Проверка уведомлений'};
-  const payload={notificationId:note.id,title:titles[note.kind]||'По пути — новое уведомление',body:'Откройте приложение, чтобы посмотреть уведомление.',path:note.target_path||'/notifications',badge};
+  const payload={notificationId:note.id,title:titles[note.kind]||'По пути — новое уведомление',body:'Откройте приложение, чтобы посмотреть уведомление.',path:note.target_path||'/notifications',recipientId:note.recipient_id,badge};
   try{await transport.deliver(sub,payload);run("UPDATE push_outbox SET status='sent',delivered_at=?,last_error='' WHERE id=? AND status='sending'",clock(),job.id)}
   catch(error){
    const status=Number(error.statusCode||503),invalid=[404,410].includes(status),terminal=invalid||error.retryable===false||job.attempts>=5;

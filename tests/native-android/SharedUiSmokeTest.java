@@ -31,6 +31,10 @@ public class SharedUiSmokeTest {
             assertTrue("Packaged login UI must render: " + value, value.contains("\"ready\":true"));
             assertTrue("Real Capacitor bridge must report Android: " + value, value.contains("\"platform\":\"android\""));
             assertTrue("Native push plugin must be registered: " + value, value.contains("\"push\":true"));
+            CountDownLatch rustoreCheck = new CountDownLatch(1);
+            AtomicReference<String> rustoreValue = new AtomicReference<>("");
+            scenario.onActivity(activity -> activity.getBridge().getWebView().evaluateJavascript("Capacitor.isPluginAvailable('PoPutiRuStorePush')", answer->{rustoreValue.set(answer);rustoreCheck.countDown();}));
+            assertTrue(rustoreCheck.await(5,TimeUnit.SECONDS));assertEquals("RuStore bridge must be available without Firebase", "true", rustoreValue.get());
             // No Firebase project is configured in the default APK; logout cleanup must still finish.
             CountDownLatch cleanup = new CountDownLatch(1);
             scenario.onActivity(activity -> activity.getBridge().getWebView().evaluateJavascript(

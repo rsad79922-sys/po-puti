@@ -22,6 +22,8 @@ if variant == 'release':
     assert app.get(ns+'debuggable') != 'true', 'Release must not be debuggable'
 metadata = {m.get(ns+'name'): m.get(ns+'value') for m in app.findall('meta-data')}
 assert metadata.get('com.yandex.mobile.ads.AUTOMATIC_SDK_INITIALIZATION') == 'false', 'Ad initialization requires consent'
+assert app.get(ns+'name') == 'ru.poputi.app.PoPutiApplication', 'Push uses explicit application initialization'
+assert not any(p.get(ns+'name') == 'ru.rustore.sdk.pushclient.provider.RuStorePushClientInitProvider' for p in app.findall('provider')), 'RuStore must not initialize before local opt-in'
 permissions = {p.get(ns+'name') for p in manifest.findall('uses-permission')}
 forbidden = {'android.permission.ACCESS_FINE_LOCATION', 'android.permission.ACCESS_COARSE_LOCATION',
              'android.permission.READ_CONTACTS', 'android.permission.READ_SMS', 'android.permission.READ_CALL_LOG',
