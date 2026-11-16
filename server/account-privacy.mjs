@@ -24,6 +24,9 @@ export async function accountPrivacy(db,dir){
    db.exec(`CREATE TABLE privacy_schema(version INTEGER PRIMARY KEY,applied_at INTEGER NOT NULL,backup_path TEXT NOT NULL);
     CREATE TABLE account_deletions(user_id TEXT PRIMARY KEY,receipt_id TEXT UNIQUE NOT NULL,deleted_at INTEGER NOT NULL,policy_version TEXT NOT NULL);
     CREATE TABLE privacy_erased_media(url TEXT PRIMARY KEY,deleted_at INTEGER NOT NULL,removed INTEGER NOT NULL DEFAULT 0);
+    CREATE TRIGGER erased_review_no_new_text BEFORE INSERT ON pair_reviews WHEN EXISTS(SELECT 1 FROM account_deletions WHERE user_id IN (NEW.author_id,NEW.target_user_id)) AND NEW.body NOT IN ('','[Данные удалены владельцем аккаунта]','Оценка выставлена автоматически') BEGIN SELECT RAISE(ABORT,'Erased account cannot receive new personal review text'); END;
+    CREATE TRIGGER erased_legacy_review_no_new_text BEFORE INSERT ON reviews WHEN EXISTS(SELECT 1 FROM account_deletions WHERE user_id IN (NEW.author_id,NEW.driver_id)) AND NEW.text NOT IN ('','[Данные удалены владельцем аккаунта]') BEGIN SELECT RAISE(ABORT,'Erased account cannot receive new personal review text'); END;
+    CREATE TRIGGER erased_message_no_insert BEFORE INSERT ON messages WHEN EXISTS(SELECT 1 FROM account_deletions WHERE user_id IN (NEW.from_id,NEW.to_id)) BEGIN SELECT RAISE(ABORT,'Erased account cannot receive new messages'); END;
     CREATE TRIGGER erased_account_no_restore BEFORE UPDATE ON users WHEN EXISTS(SELECT 1 FROM account_deletions WHERE user_id=OLD.id)
     AND (NEW.username IS NOT OLD.username OR NEW.name IS NOT OLD.name OR NEW.phone IS NOT OLD.phone OR NEW.car IS NOT OLD.car OR NEW.photo IS NOT OLD.photo OR NEW.salt IS NOT OLD.salt OR NEW.hash IS NOT OLD.hash OR NEW.role IS NOT OLD.role OR NEW.blocked_at IS NOT OLD.blocked_at OR NEW.blocked_reason IS NOT OLD.blocked_reason)
     BEGIN SELECT RAISE(ABORT,'Erased account cannot be reactivated'); END;`);
@@ -68,7 +71,7 @@ export async function accountPrivacy(db,dir){
   db.exec('BEGIN IMMEDIATE');subject=id;
   try{
    if(get('SELECT 1 FROM users WHERE id=?',id)){
-    const future="(departure_at>? OR (departure_at IS NULL AND date>=?))";
+    const future="(departure_at>? OR (departure_at IS NULL AND date>?))";
     const date=new Date(deletedAt).toISOString().slice(0,10);
     // No nested transactions, no modification of completed participation facts.
     const affected=all(`SELECT DISTINCT r.id,r.driver_id,q.user_id FROM rides r LEFT JOIN requests q ON q.ride_id=r.id AND q.status IN ('pending','accepted') WHERE ${future} AND (r.driver_id=? OR q.user_id=?)`,deletedAt,date,id,id);

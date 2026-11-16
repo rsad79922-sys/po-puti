@@ -307,7 +307,7 @@ async function handleApi(req,res,path,data){const method=req.method;
  if(/^\/api\/reviews(?:\/|$)/.test(path)&&['PUT','PATCH','DELETE'].includes(method))throw jsonError('Отправленный отзыв нельзя изменить или удалить',409);
  if(path.startsWith('/api/push/')){const result=pushApi(life,actor,path,method,data);if(result)return result}
  if(path==='/api/confirmations'&&method==='POST')return life.confirm(actor,data);
- if(path==='/api/reviews'&&method==='POST')return life.submitReview(actor,data);
+ if(path==='/api/reviews'&&method==='POST'){if(privacy.isUnavailable(String(data.targetUserId||'')))throw jsonError('Аккаунт участника удалён',409);return life.submitReview(actor,data);}
  if(path==='/api/reviews/mine'&&method==='GET')return {reviews:[...life.reviewsFor(actor.id,new Set()).filter(r=>r.authorId===actor.id),...rows("SELECT v.id,v.ride_id rideId,v.driver_id driverId,v.author_id authorId,v.score,v.text,v.created submittedAt,COALESCE(m.status,'allowed') moderationStatus,'legacy' source FROM reviews v LEFT JOIN legacy_review_moderation m ON m.review_id=v.id WHERE author_id=?",actor.id).map(r=>({...r,isAuto:false,isPublished:r.moderationStatus==='allowed'}))]};
  if(path==='/api/reviews/public'&&method==='GET'){const id=params.get('userId')||actor.id;return {reviews:life.reviewsFor('',new Set([id])),legacy:rows("SELECT id,ride_id rideId,driver_id driverId,author_id authorId,score,text,created FROM reviews WHERE driver_id=? AND COALESCE((SELECT status FROM legacy_review_moderation WHERE review_id=reviews.id),'allowed')='allowed'",id)}}
  if(path==='/api/notifications'&&method==='GET')return {items:state(actor).notifications,unreadCount:q('SELECT COUNT(*) n FROM notifications WHERE recipient_id=? AND read=0',actor.id).n};
@@ -370,6 +370,7 @@ async function handleApi(req,res,path,data){const method=req.method;
  m=path.match(/^\/api\/admin\/rides\/([^/]+)\/cancel$/);if(m&&method==='POST'){requireAdmin(actor);return cancelRide(rideById(m[1]),actor,true,data.reason)}
  m=path.match(/^\/api\/notifications\/([^/]+)\/read$/);if(m&&method==='POST'){run('UPDATE notifications SET read=1,read_at=COALESCE(read_at,?) WHERE id=? AND recipient_id=?',now(),m[1],actor.id);return {ok:true}}
  if(path==='/api/messages'&&method==='POST'){
+   if(privacy.isUnavailable(String(data.toId||'')))throw jsonError('Аккаунт участника удалён',409);
    const rideId=clean(data.rideId,100),toId=clean(data.toId,100),txt=clean(data.text,1200);if(!txt||!confirmed(rideId,actor.id,toId))throw jsonError('Чат доступен только участникам подтверждённой поездки',403);
    const id=uid();run('INSERT INTO messages VALUES(?,?,?,?,?,?)',id,rideId,actor.id,toId,txt,now());notify(toId,'Новое сообщение',txt.slice(0,120),rideId,'chat_message','/chat/'+rideId+'/'+actor.id);return {id};
  }
