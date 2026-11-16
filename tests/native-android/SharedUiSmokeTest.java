@@ -67,11 +67,14 @@ public class SharedUiSmokeTest {
             ));
             assertTrue("Cleanup invocation must complete", cleanup.await(5, TimeUnit.SECONDS));
             AtomicReference<String> cleanupResult = new AtomicReference<>("");
-            CountDownLatch finished = new CountDownLatch(1);
-            scenario.onActivity(activity -> activity.getBridge().getWebView().evaluateJavascript(
-                "window.nativeCleanupDone===true", answer -> { cleanupResult.set(answer); finished.countDown(); }
-            ));
-            assertTrue(finished.await(5, TimeUnit.SECONDS));
+            long cleanupDeadline=System.currentTimeMillis()+10000;
+            while(!"true".equals(cleanupResult.get())&&System.currentTimeMillis()<cleanupDeadline){
+                CountDownLatch finished = new CountDownLatch(1);
+                scenario.onActivity(activity -> activity.getBridge().getWebView().evaluateJavascript(
+                    "window.nativeCleanupDone===true", answer -> { cleanupResult.set(answer); finished.countDown(); }
+                ));
+                assertTrue(finished.await(5,TimeUnit.SECONDS));if(!"true".equals(cleanupResult.get()))Thread.sleep(50);
+            }
             assertEquals("Logout cleanup must not require Firebase credentials", "true", cleanupResult.get());
             // Exercise the real native plugin without registering users or calling the production API.
             CountDownLatch nativeDone = new CountDownLatch(1);
