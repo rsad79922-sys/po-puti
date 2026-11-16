@@ -19,7 +19,7 @@ public class SharedUiSmokeTest {
             long until=System.currentTimeMillis()+45000;
             while(!"isolated-notification-session".equals(PoPutiRuStoreState.session(context))&&System.currentTimeMillis()<until){
                 CountDownLatch ready=new CountDownLatch(1);
-                scenario.onActivity(activity->activity.getBridge().getWebView().evaluateJavascript("if(window.Capacitor&&Capacitor.Plugins&&Capacitor.Plugins.PoPutiFeatures&&!window.__notificationFixturePending){window.__notificationFixturePending=true;Capacitor.Plugins.PoPutiFeatures.setToken({token:'isolated-notification-session'})}",ignored->ready.countDown()));
+                scenario.onActivity(activity->activity.getBridge().getWebView().evaluateJavascript("if(document.getElementById('reg-username')&&window.Capacitor&&Capacitor.Plugins&&Capacitor.Plugins.PoPutiFeatures&&typeof restoreNativeSession==='function'&&!window.__notificationFixturePending){window.__notificationFixturePending=true;restoreNativeSession().then(()=>Capacitor.Plugins.PoPutiFeatures.setToken({token:'isolated-notification-session'}))}",ignored->ready.countDown()));
                 assertTrue(ready.await(5,TimeUnit.SECONDS));Thread.sleep(100);
             }
             assertEquals("isolated-notification-session",PoPutiRuStoreState.session(context));
