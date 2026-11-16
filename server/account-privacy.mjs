@@ -95,7 +95,7 @@ export async function accountPrivacy(db,dir){
     run('UPDATE messages SET text=? WHERE from_id=? OR to_id=?',REDACTED,id,id);
     run('UPDATE reports SET reason=?,details=?,decision=CASE WHEN decision IS NULL THEN NULL ELSE ? END WHERE author_id=? OR ride_id IN (SELECT id FROM rides WHERE driver_id=?)',REDACTED,REDACTED,REDACTED,id,id);
     run('UPDATE moderation_decisions SET comment=? WHERE ride_id IN (SELECT id FROM rides WHERE driver_id=?) OR report_id IN (SELECT id FROM reports WHERE author_id=?)',REDACTED,id,id);
-    run('UPDATE notifications SET title=?,message=? WHERE recipient_id=? OR ride_id IN (SELECT id FROM rides WHERE driver_id=?)',REDACTED,REDACTED,id,id);
+    run("UPDATE notifications SET title=?,message=? WHERE recipient_id=? OR (ride_id IN (SELECT id FROM rides WHERE driver_id=?) AND kind<>'account_erased')",REDACTED,REDACTED,id,id);
     run("UPDATE notifications SET title=?,message=? WHERE kind='chat_message' AND target_path LIKE ?",REDACTED,REDACTED,'%/'+id);
     // Name-bearing booking alerts on other drivers' rides reference no actor id.
     run("UPDATE notifications SET title=?,message=? WHERE kind IN ('booking_created','booking_cancelled','booking_accepted','booking_rejected') AND ride_id IN (SELECT ride_id FROM requests WHERE user_id=?)",REDACTED,REDACTED,id);
