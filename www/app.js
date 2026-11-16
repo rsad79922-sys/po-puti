@@ -13,7 +13,7 @@ const isCookieToken = token => token.startsWith('cookie:');
 let adminData = null;
 let serverError = '';
 let accountTab = 'login';
-const featureState={config:null,loading:false,queryKey:'',epoch:0,bus:{items:[],status:'idle'},private:null,filter:'all',choices:{},consent:false};
+const featureState={config:null,loading:false,queryKey:'',epoch:0,bus:{items:[],status:'idle'},private:null,filter:'private',choices:{},consent:false};
 let chatRecipientId = null;
 let chatRideId = null;
 let publishing = false;

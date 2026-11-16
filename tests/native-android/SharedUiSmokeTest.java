@@ -100,6 +100,8 @@ public class SharedUiSmokeTest {
                 String texts=allText(feed);
                 assertTrue(texts.contains("Информация о покупке билета отсутствует"));
                 assertTrue(texts.contains("Тестовый перевозчик"));
+                assertFalse("The removed mixed category must not appear",texts.contains("\nВсе\n"));
+                assertTrue(texts.contains("Попутчики"));assertTrue(texts.contains("Автобусы"));
                 assertFalse(texts.contains("Свободных мест"));
                 assertFalse(texts.contains("Отправить заявку"));
                 assertFalse(texts.contains("Позвонить"));
