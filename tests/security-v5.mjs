@@ -17,6 +17,7 @@ try{
  const setup=await call('/admin/mfa/enroll',{password},admin.token);assert.equal(setup.status,200);const step=Math.floor(Date.now()/30000);
  assert.equal((await call('/admin/mfa/verify',{code:totp(setup.data.secret,step)},admin.token)).status,200);
  assert.equal((await call('/admin/v3/summary',undefined,admin.token)).status,200);
+ const clockDb=new DatabaseSync(app.dir+'/po-puti.sqlite');clockDb.prepare('UPDATE session_mfa SET verified_at=?').run(Date.now()-9*3600000);clockDb.close();assert.equal((await call('/admin/v3/summary',undefined,admin.token)).status,403,'administrative factor expires after eight hours');
  assert.equal((await call('/login',{username:'secure_admin',password})).status,401);
  const login=await call('/login',{username:'secure_admin',password,mfaCode:totp(setup.data.secret,step+1)});assert.equal(login.status,200);
  assert.equal((await call('/admin/v3/summary',undefined,login.data.token)).status,200);
