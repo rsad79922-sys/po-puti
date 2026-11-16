@@ -53,7 +53,7 @@ public class PoPutiFeaturesPlugin extends Plugin {
  private Button button(String text,Runnable action){Button b=new Button(getContext());b.setText(text);b.setAllCaps(false);b.setOnClickListener(v->action.run());return b;}
  private EditText input(String hint){EditText v=new EditText(getContext());v.setSingleLine(true);v.setHint(hint);v.setTextSize(16);return v;}
  private void emit(String name,JSObject data){notifyListeners(name,data);}
- private void search(){JSObject q=new JSObject();q.put("from",from.getText().toString().trim());q.put("to",to.getText().toString().trim());q.put("date",date.getText().toString().trim());q.put("filter",filter);emit("search",q);}
+ private void search(){try{LocalDate.parse(date.getText().toString().trim());if(from.getText().toString().trim().isEmpty()||to.getText().toString().trim().isEmpty())throw new IllegalArgumentException();}catch(Exception error){Toast.makeText(getContext(),"Укажите маршрут и дату в формате ГГГГ-ММ-ДД",Toast.LENGTH_SHORT).show();return;}JSObject q=new JSObject();q.put("from",from.getText().toString().trim());q.put("to",to.getText().toString().trim());q.put("date",date.getText().toString().trim());q.put("filter",filter);emit("search",q);}
  private void attach(ViewGroup parent,View view){if(view.getParent()!=null)((ViewGroup)view.getParent()).removeView(view);parent.addView(view);}
  private void createRoot(){
   root=column();root.setTag("po-puti-native-search");root.setFitsSystemWindows(true);root.setBackgroundColor(Color.rgb(246,248,252));root.setPadding(dp(16),dp(16),dp(16),dp(12));
