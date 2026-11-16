@@ -30,8 +30,13 @@ jobs:
     uses: ./.github/workflows/android-build.yml
     secrets:
       FIREBASE_ANDROID_CONFIG_JSON: ${{ secrets.FIREBASE_ANDROID_CONFIG_JSON }}
-  release:
+  rasp:
     needs: [verify, android]
+    uses: ./.github/workflows/check-yandex-rasp.yml
+    secrets:
+      YANDEX_RASP_API_KEY: ${{ secrets.YANDEX_RASP_API_KEY }}
+  release:
+    needs: [verify, android, rasp]
     if: github.ref == 'refs/heads/main' && ((github.event_name == 'push' && vars.POPUTI_AUTO_DEPLOY != 'false') || (github.event_name == 'workflow_dispatch' && inputs.confirmation == 'publish-vputipoputka.ru'))
     runs-on: ubuntu-24.04
     environment: production

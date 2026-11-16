@@ -1,6 +1,6 @@
 import {readFileSync} from 'node:fs';
 import {parseEnv} from 'node:util';
-const config=parseEnv(readFileSync(process.argv[2],'utf8'));
+const config=process.argv[2]?parseEnv(readFileSync(process.argv[2],'utf8')):process.env;
 if(!/^[A-Za-z0-9_-]{10,200}$/.test(config.YANDEX_RASP_API_KEY||''))throw Error('Missing or invalid private key');
 try{
  const response=await fetch('https://api.rasp.yandex-net.ru/v3.0/copyright/?format=json',{
