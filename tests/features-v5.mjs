@@ -45,7 +45,7 @@ try{
  await ok('/series/'+single.seriesId+'/update','POST',{...singleBody,time:'13:00',routeQuoteId:editedQuote.routeQuoteId},driver);
  assert.equal(db.prepare('SELECT time FROM rides WHERE id=?').get(single.rides[0].id).time,'13:00');
  assert.equal((await api('/series/'+single.seriesId+'/update','POST',{...singleBody,time:'13:00',seriesEnd:end,routeQuoteId:editedQuote.routeQuoteId},driver)).status,409,'editing cannot extend the series');
- const found=await ok('/search?'+new URLSearchParams({from:'Москва',to:'Тверь',date:created.rides[2].date,type:'private'}),'GET',undefined,passenger);assert.equal(found.private.items.length,1);assert.equal(found.private.items[0].seriesId,created.seriesId);
+ const found=await ok('/search?'+new URLSearchParams({from:'москва',to:'тверь',date:created.rides[2].date,type:'private'}),'GET',undefined,passenger);assert.equal(found.private.items.length,1);assert.equal(found.private.items[0].seriesId,created.seriesId);
  assert.equal((await ok('/search?from=Москва&to=Тверь&date='+start+'&type=bus','GET',undefined,driver)).bus.status,'not_configured');
  const config=await ok('/client-config','GET',undefined,driver);assert.equal(config.ads.enabled,false);assert(config.ads.web.length===2&&config.ads.android.length===2);
  const deletion=await ok('/account/deletion-request','POST',{confirmation:'DELETE_MY_ACCOUNT'},passenger);assert.equal(deletion.status,'pending');assert.equal(db.prepare('SELECT name FROM users WHERE id=?').get(passenger.user.id).name,'series_passenger','request does not delete user data');

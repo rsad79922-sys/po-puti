@@ -23,7 +23,7 @@ function unifiedResults(){
  const priv=featureState.private||local;return [...(featureState.filter==='bus'?[]:priv.map(r=>({...r,type:'private_ride'}))),...(featureState.filter==='private'||featureState.bus.expiresAt&&Date.now()>=featureState.bus.expiresAt?[]:featureState.bus.items)].sort((a,b)=>String(a.departureAt||a.date+'T'+a.time).localeCompare(String(b.departureAt||b.date+'T'+b.time))||a.id.localeCompare(b.id));
 }
 function unifiedSearchPage(){const items=unifiedResults();const ads=featureState.config?.ads.enabled;return `<main class="page"><div class="page-head"><h1>Куда едем?</h1><p>Попутчики и междугородние автобусы</p></div>${searchPanel()}${adSlot('search')}<div class="segmented" aria-label="Тип поездки">${[['all','Все'],['private','Попутчики'],['bus','Автобусы']].map(([v,label])=>`<button data-search-filter="${v}" class="${featureState.filter===v?'active':''}">${label}</button>`).join('')}</div>${featureState.filter!=='private'?busStatus()+placeChoices('from')+placeChoices('to'):''}<div class="trip-list">${items.length?items.map((r,i)=>(r.type==='bus_service'?busCard(r):rideCard(r))+(i===4?adSlot('results'):'')).join(''):empty('Подходящих поездок пока нет','Измените маршрут или дату. Отсутствие автобусного ответа не означает отсутствие рейсов.')}${items.length<5?adSlot('results'):''}</div>${featureState.filter!=='private'?raspCopyright():''}${featureState.privateCursor&&featureState.filter!=='bus'?'<button class="btn btn-ghost" data-more-private>Ещё частные поездки</button>':''}${featureState.bus.nextOffset!=null?'<button class="btn btn-ghost" data-more-buses>Ещё автобусные рейсы</button>':''}${ads?`<section class="privacy-ads"><p>Реклама Яндекса загружается с вашего согласия.</p><button class="small-link" data-ad-consent="${featureState.consent?'false':'true'}">${featureState.consent?'Отключить рекламу':'Разрешить рекламу'}</button></section>`:''}<button class="btn btn-primary full" data-action="nav" data-route="/publish">Предложить поездку</button><a class="small-link" href="/privacy.html" target="_blank" rel="noopener">Конфиденциальность и источники данных</a></main>`}
-async function runUnifiedSearch(more=false){
+async function runUnifiedSearch(more=false,resolving=false){
  if(!remoteMode||!accessToken)return;const q=db.search||{};if(!q.from||!q.to||!q.date)return;
  const epoch=more?featureState.epoch:++featureState.epoch,token=accessToken,key=JSON.stringify(q);featureState.queryKey=key;
  if(!more){featureState.private=null;featureState.privateCursor=null;featureState.bus={items:[],status:'loading'};featureState.choices={};}
@@ -31,11 +31,15 @@ async function runUnifiedSearch(more=false){
  if(more)args.set('offset',String(featureState.bus.nextOffset||0));
  const live=()=>epoch===featureState.epoch&&token===accessToken;
  const rerender=()=>{if(location.hash==='#/search')render()};
- if(!more)api('/search?'+args+'&type=private').then(data=>{if(!live())return;featureState.private=data.private.items;featureState.privateCursor=data.private.nextCursor;rerender()}).catch(()=>{});
+ if(!more)api('/search?'+new URLSearchParams({from:q.from,to:q.to,date:q.date,type:'private'})).then(data=>{if(!live())return;featureState.private=data.private.items;featureState.privateCursor=data.private.nextCursor;rerender()}).catch(()=>{});
  try{
   const data=await api('/search?'+args+'&type=bus');if(!live())return;
   const previous=more?featureState.bus.items:[];featureState.bus={...data.bus,items:[...new Map([...previous,...data.bus.items].map(r=>[r.id,r])).values()]};clearTimeout(featureState.busTimer);if(data.bus.expiresAt)featureState.busTimer=setTimeout(()=>{if(!live())return;featureState.bus.items=[];featureState.queryKey='';if(document.visibilityState==='visible'&&location.hash==='#/search'){if(navigator.onLine)runUnifiedSearch();render();}},Math.max(0,data.bus.expiresAt-Date.now()));
-  if(data.bus.status==='choose_places')for(const side of ['from','to']){const choices=await api('/search/places?q='+encodeURIComponent(q[side]));if(!live())return;featureState.choices[side]=choices.items||[];if(!choices.items?.length&&choices.status==='unavailable')featureState.bus.status='unavailable';}
+  if(data.bus.status==='choose_places'){
+   const resolved={...q};let unambiguous=true;
+   for(const side of ['from','to']){const choices=await api('/search/places?q='+encodeURIComponent(q[side]));if(!live())return;featureState.choices[side]=choices.items||[];const exact=(choices.items||[]).filter(p=>p.kind==='settlement'&&p.title.toLocaleLowerCase('ru')===q[side].toLocaleLowerCase('ru'));const selected=q[side+'Code'];if(selected&&(choices.items||[]).some(p=>p.code===selected))resolved[side+'Code']=selected;else if(exact.length===1&&(!selected||selected.startsWith('c')))resolved[side+'Code']=exact[0].code;else unambiguous=false;if(!choices.items?.length&&choices.status==='unavailable')featureState.bus.status='unavailable';}
+   if(unambiguous&&!resolving){db.search=resolved;save();await runUnifiedSearch(false,true);return;}
+  }
  }catch{if(live())featureState.bus={items:[],status:'unavailable'}}finally{if(live())rerender()}
 }
 async function syncFeatures(){
@@ -104,7 +108,7 @@ document.addEventListener('click',async e=>{
 
 async function loadMorePrivate(){
  if(!featureState.privateCursor||featureState.privateLoading)return;featureState.privateLoading=true;const epoch=featureState.epoch,token=accessToken,q=db.search||{};
- try{const args=new URLSearchParams({from:q.fromCode||q.from,to:q.toCode||q.to,date:q.date,type:'private',cursor:featureState.privateCursor});const data=await api('/search?'+args);if(epoch!==featureState.epoch||token!==accessToken)return;featureState.private=[...new Map([...(featureState.private||[]),...data.private.items].map(r=>[r.id,r])).values()];featureState.privateCursor=data.private.nextCursor;if(location.hash==='#/search')render();}
+ try{const args=new URLSearchParams({from:q.from,to:q.to,date:q.date,type:'private',cursor:featureState.privateCursor});const data=await api('/search?'+args);if(epoch!==featureState.epoch||token!==accessToken)return;featureState.private=[...new Map([...(featureState.private||[]),...data.private.items].map(r=>[r.id,r])).values()];featureState.privateCursor=data.private.nextCursor;if(location.hash==='#/search')render();}
  catch{if(epoch===featureState.epoch&&token===accessToken)toast('Не удалось загрузить следующую страницу. Повторите попытку.')}
  finally{featureState.privateLoading=false}
 }
