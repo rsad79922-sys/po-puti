@@ -76,3 +76,25 @@ console.log('GEOCODER_SETTINGS',JSON.stringify({provider:env.GEOCODING_PROVIDER|
 if(env.GEOCODING_API_KEY){const url=new URL(env.GEOCODING_URL||'https://geocode-maps.yandex.ru/v1');url.searchParams.set('apikey',env.GEOCODING_API_KEY);url.searchParams.set('geocode','Москва, Тверская улица, 1');url.searchParams.set('format','json');url.searchParams.set('lang','ru_RU');url.searchParams.set('results','5');try{const response=await fetch(url,{redirect:'error',signal:AbortSignal.timeout(10000)});let data;try{data=await response.json()}catch{}console.log('GEOCODER_UPSTREAM',JSON.stringify({http:response.status,matches:data?.response?.GeoObjectCollection?.featureMember?.length??null,errorCode:data?.statusCode??null}));}catch(e){console.log('GEOCODER_UPSTREAM',JSON.stringify({error:e.name,networkCode:e.cause?.code||null}))}}
 
 GEO_DIAG
+
+printf 'RELEASE_FEATURE_SETTINGS_PRESENCE\n'
+node --input-type=module <<'FEATURE_DIAG'
+import {readFileSync} from 'node:fs';
+import {parseEnv} from 'node:util';
+let disk={};
+for(const file of ['/etc/po-puti/po-puti.env','/etc/po-puti/routing.env','/etc/po-puti/push.env','/etc/po-puti/features.env','/etc/po-puti/rasp.env','/etc/po-puti/yandex-rasp.env']){
+ try{Object.assign(disk,parseEnv(readFileSync(file,'utf8')))}catch{}
+}
+console.log('FEATURE_SETTINGS',JSON.stringify({
+ raspKeyPresent:!!disk.YANDEX_RASP_API_KEY,raspTermsConfirmed:disk.RASP_LICENSE_CONFIRMED==='true',raspDailyLimit:Number(disk.RASP_DAILY_LIMIT)||0,raspCacheSeconds:Number(disk.RASP_CACHE_SECONDS)||0,
+ adsEnabled:disk.ADS_ENABLED==='true',adsTermsConfirmed:disk.ADS_TERMS_CONFIRMED==='true',webSlotsPresent:['SEARCH','RESULTS'].filter(n=>!!disk['ADS_WEB_'+n+'_ID']).length,androidSlotsPresent:['SEARCH','RESULTS'].filter(n=>!!disk['ADS_ANDROID_'+n+'_ID']).length,
+ privacyOperatorPresent:!!disk.PRIVACY_OPERATOR,privacyContactPresent:!!disk.PRIVACY_CONTACT,privacyApproved:disk.PRIVACY_POLICY_APPROVED==='true',
+ nativeFcmConfigured:!!disk.FCM_PROJECT_ID&&!!(disk.FCM_SERVICE_ACCOUNT_JSON||disk.GOOGLE_APPLICATION_CREDENTIALS),nativeRuStoreConfigured:!!disk.RUSTORE_PUSH_PROJECT_ID&&!!disk.RUSTORE_PUSH_SERVICE_TOKEN,
+ previousVersionCodePresent:/^[1-9]\d*$/.test(disk.ANDROID_PREVIOUS_VERSION_CODE||''),previousCertificatePresent:/^[a-f0-9:]{64,95}$/i.test(disk.ANDROID_PREVIOUS_CERT_SHA256||'')
+}));
+// One authenticated request to a public metadata endpoint; never output the key or returned HTML.
+if(disk.YANDEX_RASP_API_KEY){try{
+ const response=await fetch('https://api.rasp.yandex-net.ru/v3.0/copyright/?format=json',{headers:{Authorization:disk.YANDEX_RASP_API_KEY},redirect:'error',signal:AbortSignal.timeout(10000)});
+ const data=await response.json().catch(()=>null);console.log('RASP_AUTH_PROBE',JSON.stringify({http:response.status,copyrightPresent:!!data?.copyright}));
+}catch{console.log('RASP_AUTH_PROBE',JSON.stringify({status:'network_unavailable'}))}}
+FEATURE_DIAG
