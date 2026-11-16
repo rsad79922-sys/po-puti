@@ -65,7 +65,7 @@ public final class PoPutiRuStoreState {
  }
  static void syncToken(Context context,String token){
   String expectedSession,deviceId,userId;
-  synchronized(LOCK){if(!active(context)||!token.matches("[A-Za-z0-9_:.-]{30,4096}"))return;expectedSession=session(context);deviceId=prefs(context).getString("device","");userId=recipient(context);}
+  synchronized(LOCK){if(!active(context)||token==null||!token.matches("[A-Za-z0-9_:.-]{30,4096}"))return;expectedSession=session(context);deviceId=prefs(context).getString("device","");userId=recipient(context);}
   HttpURLConnection connection=null;
   try{
    JSONObject payload=new JSONObject().put("platform","android").put("provider","rustore").put("deviceId",deviceId).put("token",token);

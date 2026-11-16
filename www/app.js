@@ -461,13 +461,14 @@ async function bindNativePush(){if(nativePushBound||!nativePlatform())return;con
 async function enablePush(){
  const token=accessToken;if(!token)return;const config=pushConfig;if(!config)throw Error('Настройки ещё загружаются');
  if(nativePlatform()){
-  const rustore=getRuStorePush();if(config.rustore&&rustore&&(await rustore.status()).configured){
+  const rustore=getRuStorePush(),rustoreStatus=rustore?await rustore.status():null;if(config.rustore&&rustoreStatus?.configured){
+   if(config.rustoreProjectId&&rustoreStatus.projectId&&config.rustoreProjectId!==rustoreStatus.projectId)throw Error('Настройки уведомлений этой сборки не совпадают с сервером.');
    await bindRuStorePush();const registration=await rustore.register();if(token!==accessToken){await rustore.disable();return;}
    await api('/push/subscribe','POST',{deviceId:pushDeviceId(),platform:'android',provider:'rustore',token:registration.token});
    if(token!==accessToken){await rustore.disable();return;}
    await rustore.activate({userId:db.currentUserId,deviceId:pushDeviceId(),sessionToken:token});pushMessage='Уведомления RuStore включены для этого устройства.';refreshPushWidget();return;
   }
-  if(!config.android)throw Error('Для Android ещё не настроен Firebase/FCM на сервере');
+  if(!config.android)throw Error('Фоновые уведомления Android ещё не настроены на сервере или в этой сборке');
   const plugin=getNativePush();if(!plugin)throw Error('Пересоберите Android-приложение с push-плагином');
   await plugin.createChannel?.({id:'trip_updates',name:'Поездки и отзывы',importance:4,visibility:0});
   const permission=await plugin.requestPermissions();if(permission.receive!=='granted')throw Error('Уведомления не разрешены. Центр уведомлений продолжит работать.');

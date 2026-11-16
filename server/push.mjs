@@ -19,7 +19,7 @@ export function createPush({env=process.env,sendWeb,sendAndroid,sendRustore,fetc
   if(credentials.type!=='service_account'||!String(credentials.client_email||'').endsWith('.gserviceaccount.com')||!String(credentials.private_key||'').includes('BEGIN PRIVATE KEY')||credentials.project_id!==env.FCM_PROJECT_ID)throw Error('Invalid FCM service-account configuration');
   auth=new GoogleAuth({authClient:new JWT({email:credentials.client_email,key:credentials.private_key,scopes:['https://www.googleapis.com/auth/firebase.messaging']})});
  }
- const available=()=>({web:webReady,android:androidReady,rustore:rustoreReady,androidProviders:{fcm:androidReady,rustore:rustoreReady},vapidPublicKey:webReady?env.VAPID_PUBLIC_KEY:null});
+ const available=()=>({web:webReady,android:androidReady,rustore:rustoreReady,rustoreProjectId:rustoreReady?env.RUSTORE_PUSH_PROJECT_ID||null:null,androidProviders:{fcm:androidReady,rustore:rustoreReady},vapidPublicKey:webReady?env.VAPID_PUBLIC_KEY:null});
  async function deliver(sub,payload){
   if(sub.platform==='web'){
    if(!webReady&&!sendWeb)throw Object.assign(Error('Push not configured'),{retryable:false});

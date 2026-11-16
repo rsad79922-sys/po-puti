@@ -11,7 +11,7 @@ import ru.rustore.sdk.core.feature.model.FeatureAvailabilityResult;
 @CapacitorPlugin(name="PoPutiRuStorePush",permissions={@Permission(alias="notifications",strings={Manifest.permission.POST_NOTIFICATIONS})})
 public class PoPutiRuStorePushPlugin extends Plugin {
  @Override public void load(){handleIntent(getActivity().getIntent());}
- @PluginMethod public void status(PluginCall call){call.resolve(new JSObject().put("configured",PoPutiApplication.rustoreConfigured()).put("initialized",PoPutiApplication.rustoreConfigured()&&RuStorePushClient.INSTANCE.isInitialized()).put("enabled",PoPutiRuStoreState.active(getContext())));}
+ @PluginMethod public void status(PluginCall call){call.resolve(new JSObject().put("projectId",BuildConfig.RUSTORE_PUSH_PROJECT_ID).put("configured",PoPutiApplication.rustoreConfigured()).put("initialized",PoPutiApplication.rustoreConfigured()&&RuStorePushClient.INSTANCE.isInitialized()).put("enabled",PoPutiRuStoreState.active(getContext())));}
  @PluginMethod public void register(PluginCall call){
   if(!PoPutiApplication.rustoreConfigured()){call.reject("RuStore Push не настроен в этой сборке");return;}
   if(PoPutiRuStoreState.session(getContext()).isEmpty()){call.reject("Войдите в аккаунт");return;}
