@@ -22,6 +22,8 @@ jobs:
     uses: ./.github/workflows/verify.yml
   android:
     uses: ./.github/workflows/android-build.yml
+    secrets:
+      RUSTORE_PUSH_PROJECT_ID: ${{ secrets.RUSTORE_PUSH_PROJECT_ID }}
   candidate:
     needs: [verify, android]
     runs-on: ubuntu-24.04
@@ -40,6 +42,7 @@ jobs:
           ANDROID_VERSION_CODE: ${{ inputs.version_code }}
           ANDROID_PREVIOUS_VERSION_CODE: ${{ inputs.previous_version_code }}
           ANDROID_VERSION_NAME: ${{ inputs.version_name }}
+          RUSTORE_PUSH_PROJECT_ID: ${{ secrets.RUSTORE_PUSH_PROJECT_ID }}
         run: |
           node -e 'const a=Number(process.env.ANDROID_VERSION_CODE),b=Number(process.env.ANDROID_PREVIOUS_VERSION_CODE);if(!Number.isInteger(a)||!Number.isInteger(b)||b<1||a<=b)process.exit(1)'
           npm ci --ignore-scripts

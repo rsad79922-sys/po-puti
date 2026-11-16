@@ -30,6 +30,7 @@ jobs:
     uses: ./.github/workflows/android-build.yml
     secrets:
       FIREBASE_ANDROID_CONFIG_JSON: ${{ secrets.FIREBASE_ANDROID_CONFIG_JSON }}
+      RUSTORE_PUSH_PROJECT_ID: ${{ secrets.RUSTORE_PUSH_PROJECT_ID }}
   rasp:
     needs: [verify, android]
     uses: ./.github/workflows/check-yandex-rasp.yml

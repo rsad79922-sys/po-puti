@@ -12,6 +12,31 @@ import java.util.concurrent.atomic.AtomicReference;
 /** Runs the actual generated Capacitor activity and packaged WebView, no production writes. */
 @RunWith(AndroidJUnit4.class)
 public class SharedUiSmokeTest {
+    @Test public void genericNotificationIsBoundToOptedInAccountAndClearedOnLogout() throws Exception {
+        android.content.Context context=androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().getTargetContext();
+        if(android.os.Build.VERSION.SDK_INT>=33)try(java.io.InputStream input=new android.os.ParcelFileDescriptor.AutoCloseInputStream(androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().getUiAutomation().executeShellCommand("pm grant ru.poputi.app android.permission.POST_NOTIFICATIONS"))){byte[] buffer=new byte[256];while(input.read(buffer)!=-1){}}
+        try(ActivityScenario<MainActivity> scenario=ActivityScenario.launch(MainActivity.class)){
+            long until=System.currentTimeMillis()+45000;
+            while(!"isolated-notification-session".equals(PoPutiRuStoreState.session(context))&&System.currentTimeMillis()<until){
+                CountDownLatch ready=new CountDownLatch(1);
+                scenario.onActivity(activity->activity.getBridge().getWebView().evaluateJavascript("if(document.getElementById('reg-username')&&window.Capacitor&&Capacitor.Plugins&&Capacitor.Plugins.PoPutiFeatures&&typeof restoreNativeSession==='function'&&!window.__notificationFixturePending){window.__notificationFixturePending=true;restoreNativeSession().then(()=>Capacitor.Plugins.PoPutiFeatures.setToken({token:'isolated-notification-session'}))}",ignored->ready.countDown()));
+                assertTrue(ready.await(5,TimeUnit.SECONDS));Thread.sleep(100);
+            }
+            assertEquals("isolated-notification-session",PoPutiRuStoreState.session(context));
+            PoPutiRuStoreState.activate(context,"fixture-account","fixture-device-1234","isolated-notification-session");
+            java.util.Map<String,String> data=new java.util.HashMap<>();data.put("notificationId","fixture-note");data.put("recipientId","fixture-account");data.put("path","https://attacker.invalid/");
+            PoPutiRuStoreState.display(context,data);PoPutiRuStoreState.display(context,data);
+            android.app.NotificationManager manager=(android.app.NotificationManager)context.getSystemService(android.content.Context.NOTIFICATION_SERVICE);
+            awaitNotificationCount(manager,1);
+            android.app.Notification notice=manager.getActiveNotifications()[0].getNotification();
+            assertEquals("Откройте приложение, чтобы посмотреть уведомление.",notice.extras.getString(android.app.Notification.EXTRA_TEXT));
+            assertEquals(R.drawable.ic_poputi_notification,notice.getSmallIcon().getResId());
+            data.put("notificationId","wrong-recipient");data.put("recipientId","another-account");PoPutiRuStoreState.display(context,data);assertEquals(1,manager.getActiveNotifications().length);
+            PoPutiRuStoreState.disable(context,false);awaitNotificationCount(manager,0);
+            data.put("recipientId","fixture-account");PoPutiRuStoreState.display(context,data);assertEquals(0,manager.getActiveNotifications().length);
+        }finally{PoPutiRuStoreState.disable(context,false);context.getSharedPreferences(PoPutiRuStoreState.SESSION,android.content.Context.MODE_PRIVATE).edit().clear().commit();}
+    }
+    private static void awaitNotificationCount(android.app.NotificationManager manager,int expected)throws Exception{long until=System.currentTimeMillis()+5000;while(manager.getActiveNotifications().length!=expected&&System.currentTimeMillis()<until)Thread.sleep(50);assertEquals(expected,manager.getActiveNotifications().length);}
     @Test public void launchesPackagedUiAndNativeBridge() throws Exception {
         try (ActivityScenario<MainActivity> scenario = ActivityScenario.launch(MainActivity.class)) {
             long until = System.currentTimeMillis() + 45000;
@@ -31,6 +56,10 @@ public class SharedUiSmokeTest {
             assertTrue("Packaged login UI must render: " + value, value.contains("\"ready\":true"));
             assertTrue("Real Capacitor bridge must report Android: " + value, value.contains("\"platform\":\"android\""));
             assertTrue("Native push plugin must be registered: " + value, value.contains("\"push\":true"));
+            CountDownLatch rustoreCheck = new CountDownLatch(1);
+            AtomicReference<String> rustoreValue = new AtomicReference<>("");
+            scenario.onActivity(activity -> activity.getBridge().getWebView().evaluateJavascript("Capacitor.isPluginAvailable('PoPutiRuStorePush')", answer->{rustoreValue.set(answer);rustoreCheck.countDown();}));
+            assertTrue(rustoreCheck.await(5,TimeUnit.SECONDS));assertEquals("RuStore bridge must be available without Firebase", "true", rustoreValue.get());
             // No Firebase project is configured in the default APK; logout cleanup must still finish.
             CountDownLatch cleanup = new CountDownLatch(1);
             scenario.onActivity(activity -> activity.getBridge().getWebView().evaluateJavascript(
@@ -38,11 +67,14 @@ public class SharedUiSmokeTest {
             ));
             assertTrue("Cleanup invocation must complete", cleanup.await(5, TimeUnit.SECONDS));
             AtomicReference<String> cleanupResult = new AtomicReference<>("");
-            CountDownLatch finished = new CountDownLatch(1);
-            scenario.onActivity(activity -> activity.getBridge().getWebView().evaluateJavascript(
-                "window.nativeCleanupDone===true", answer -> { cleanupResult.set(answer); finished.countDown(); }
-            ));
-            assertTrue(finished.await(5, TimeUnit.SECONDS));
+            long cleanupDeadline=System.currentTimeMillis()+10000;
+            while(!"true".equals(cleanupResult.get())&&System.currentTimeMillis()<cleanupDeadline){
+                CountDownLatch finished = new CountDownLatch(1);
+                scenario.onActivity(activity -> activity.getBridge().getWebView().evaluateJavascript(
+                    "window.nativeCleanupDone===true", answer -> { cleanupResult.set(answer); finished.countDown(); }
+                ));
+                assertTrue(finished.await(5,TimeUnit.SECONDS));if(!"true".equals(cleanupResult.get()))Thread.sleep(50);
+            }
             assertEquals("Logout cleanup must not require Firebase credentials", "true", cleanupResult.get());
             // Exercise the real native plugin without registering users or calling the production API.
             CountDownLatch nativeDone = new CountDownLatch(1);
