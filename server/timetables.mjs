@@ -5,6 +5,14 @@ import {zoneAt,validZone} from './timezones.mjs';
 const text=(v,n=200)=>typeof v==='string'?v.trim().slice(0,n):'';
 const code=v=>/^[cs]\d{1,12}$/.test(String(v||''));
 const day=86400000;
+export function raspInstant(value){
+ if(typeof value!=='string')return NaN;
+ const iso=value.replace(' ','T');
+ if(!/^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:\d{2})?$/i.test(iso))return NaN;
+ const date=iso.slice(0,10),midnight=Date.parse(date+'T00:00:00Z');if(!Number.isFinite(midnight)||new Date(midnight).toISOString().slice(0,10)!==date)return NaN;
+ // search requests explicitly specify result_timezone=UTC, including offset-less legacy responses.
+ return Date.parse(/(?:Z|[+-]\d{2}:\d{2})$/i.test(iso)?iso:iso+'Z');
+}
 export function safeTicketUrl(value){try{const u=new URL(value);return u.protocol==='https:'&&!u.username&&!u.password&&u.port===''&&u.hostname.includes('.')&&!/^(?:localhost|127\.|10\.|192\.168\.|169\.254\.)/.test(u.hostname)?u.href:''}catch{return ''}}
 export function prepareTimetableCache(db){db.exec(`PRAGMA secure_delete=ON;
  CREATE TABLE IF NOT EXISTS external_cache(cache_key TEXT PRIMARY KEY,value_json TEXT NOT NULL,expires_at INTEGER NOT NULL);
@@ -90,12 +98,12 @@ export function timetables(db,{env=process.env,clock=Date.now,fetcher=fetch,cach
    const items=[];
    for(const s of raw.segments){
     if(s.has_transfers||s.thread?.transport_type!=='bus'||!code(s.from?.code)||!code(s.to?.code))continue;
-    const dep=Date.parse(s.departure),arr=Date.parse(s.arrival);if(!Number.isFinite(dep)||!Number.isFinite(arr)||arr<dep)continue;
+    const dep=raspInstant(s.departure),arr=raspInstant(s.arrival);if(!Number.isFinite(dep)||!Number.isFinite(arr)||arr<dep)continue;
     const origin=resolve(s.from.code),destination=resolve(s.to.code),originZone=origin?.time_zone||a.time_zone;
     const local=new Intl.DateTimeFormat('en-CA',{timeZone:originZone,year:'numeric',month:'2-digit',day:'2-digit'}).format(dep);if(local!==date)continue;
     let destZone=destination?.time_zone||b.time_zone;try{validZone(destZone)}catch{destZone=originZone}
     const purchase=get('SELECT * FROM bus_purchase_info WHERE thread_uid=? AND service_date=? AND from_code=? AND to_code=? AND valid_until>?',text(s.thread.uid),date,s.from.code,s.to.code,clock());
-    items.push({type:'bus_service',id:createHash('sha256').update(JSON.stringify([s.thread.uid,s.from.code,s.to.code,s.departure])).digest('hex'),departureAt:new Date(dep).toISOString(),arrivalAt:new Date(arr).toISOString(),departureTimeZone:originZone,destinationTimeZone:destZone,from:text(s.from.title),to:text(s.to.title),carrier:text(s.thread.carrier?.title),purchase:purchase?{url:safeTicketUrl(purchase.url),cashier:text(purchase.cashier,500)}:{url:'',cashier:''},source:'yandex_rasp'});
+    items.push({type:'bus_service',id:createHash('sha256').update(JSON.stringify([s.thread.uid,s.from.code,s.to.code,dep])).digest('hex'),departureAt:new Date(dep).toISOString(),arrivalAt:new Date(arr).toISOString(),departureTimeZone:originZone,destinationTimeZone:destZone,from:text(s.from.title),to:text(s.to.title),carrier:text(s.thread.carrier?.title),purchase:purchase?{url:safeTicketUrl(purchase.url),cashier:text(purchase.cashier,500)}:{url:'',cashier:''},source:'yandex_rasp'});
    }
    const total=Number(raw.pagination?.total)||items.length;const out={items,status:items.length?'ok':'empty',nextOffset:offset+50<total?offset+50:null,expiresAt:clock()+ttl(),copyright:credit,attribution:credit.text,attributionUrl:credit.url};
    run('INSERT INTO external_cache VALUES(?,?,?) ON CONFLICT(cache_key) DO UPDATE SET value_json=excluded.value_json,expires_at=excluded.expires_at',cacheKey,JSON.stringify(out),clock()+ttl());return out;

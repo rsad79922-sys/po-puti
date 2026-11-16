@@ -6,7 +6,7 @@ import {randomUUID,createHash} from 'node:crypto';
 import {readdir} from 'node:fs/promises';
 import {isolatedServer} from './helpers/server.mjs';
 import {seriesDates} from '../server/ride-series.mjs';
-import {prepareTimetableCache,timetables} from '../server/timetables.mjs';
+import {prepareTimetableCache,timetables,raspInstant} from '../server/timetables.mjs';
 import {adminMfa,totp} from '../server/admin-mfa.mjs';
 import {migrateFeatures} from '../server/migrations-v5.mjs';
 
@@ -16,6 +16,7 @@ async function api(path,method='GET',body,who){const r=await fetch(app.base+'/ap
 async function ok(...args){const r=await api(...args);assert.equal(r.status,200,JSON.stringify(r));return r.data}
 const register=name=>ok('/register','POST',{username:name,password:'private-'+randomUUID()});
 try{
+ const oldZone=process.env.TZ;process.env.TZ='America/Los_Angeles';try{assert.equal(raspInstant('2030-05-10 04:00:00'),Date.parse('2030-05-10T04:00:00Z'));assert.equal(raspInstant('2030-05-10T09:00:00+05:00'),raspInstant('2030-05-10T04:00:00Z'));assert(Number.isNaN(raspInstant('2030-02-31T04:00:00Z')))}finally{if(oldZone===undefined)delete process.env.TZ;else process.env.TZ=oldZone}
  const driver=await register('series_driver'),passenger=await register('series_passenger'),stranger=await register('series_stranger');
  db=new DatabaseSync(app.dir+'/po-puti.sqlite');db.exec('PRAGMA foreign_keys=ON');
  assert.equal(db.prepare('PRAGMA table_info(sessions)').all().length,3,'old code rollback retains positional session inserts');const legacyToken='legacy_'+randomUUID();db.prepare('INSERT INTO sessions VALUES(?,?,?)').run(createHash('sha256').update(legacyToken).digest('hex'),driver.user.id,Date.now()+60000);assert.equal((await api('/routing/config','GET',undefined,{token:legacyToken})).status,200);
