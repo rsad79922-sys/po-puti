@@ -19,5 +19,6 @@ public class PoPutiApplication extends Application {
   public void warn(String message,Throwable error){}
   public void error(String message,Throwable error){}
   public Logger createLogger(String tag){return this;}
+  public Logger createLogger(Object tag){return this;}
  }
 }
