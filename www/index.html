@@ -66,10 +66,10 @@
     function loadApp(){
       status('Запускаем приложение…');
       var script=document.createElement('script');
-      script.src='/app.js?v=rustore-push-v7';
+      script.src='/app.js?v=two-search-tabs-v8';
       script.onload=ready;
       script.onerror=function(){fail('Не удалось загрузить app.js. Проверьте подключение.')};
-      var features=document.createElement('script');features.src='/features-v5.js?v=rustore-push-v7';features.onload=function(){document.body.appendChild(script)};features.onerror=function(){fail('Не удалось загрузить приложение. Повторите попытку.')};document.body.appendChild(features);
+      var features=document.createElement('script');features.src='/features-v5.js?v=two-search-tabs-v8';features.onload=function(){document.body.appendChild(script)};features.onerror=function(){fail('Не удалось загрузить приложение. Повторите попытку.')};document.body.appendChild(features);
     }
     function start(){
       if(started)return;
