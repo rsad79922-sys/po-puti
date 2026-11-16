@@ -4,7 +4,7 @@ import {randomUUID} from 'node:crypto';
 import {chromium,webkit} from 'playwright';
 import {isolatedServer} from './helpers/server.mjs';
 import {roadFixture} from './helpers/road.mjs';
-const road=await roadFixture(5400),app=await isolatedServer({...road.env,APP_ORIGINS:'https://localhost',ADS_ENABLED:'true',ADS_TERMS_CONFIRMED:'true'});
+const road=await roadFixture(5400),app=await isolatedServer({...road.env,APP_ORIGINS:'https://localhost',ADS_ENABLED:'true',ADS_TERMS_CONFIRMED:'true',PRIVACY_POLICY_APPROVED:'true',PRIVACY_OPERATOR:'Isolated test operator',PRIVACY_CONTACT:'test@example.invalid'});
 let browser,db;
 try{
  const engine=process.env.BROWSER_ENGINE||'chromium';browser=await(engine==='webkit'?webkit:chromium).launch({headless:true,...(engine==='chromium'?{...(process.env.CHROMIUM_PATH?{executablePath:process.env.CHROMIUM_PATH}:{}),args:['--no-sandbox']}:{})});

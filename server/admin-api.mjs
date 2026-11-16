@@ -42,6 +42,7 @@ export function adminApi(l){
    if(type==='users'&&['block','unblock'].includes(action)){
     const user=get('SELECT * FROM users WHERE id=?',id);if(!user)throw fail('Пользователь не найден',404);
     if(action==='block'&&(user.id===actor.id||user.role==='admin'))throw fail('Блокировка администратора через панель запрещена',409);
+    if(user.username.startsWith('!deleted:'))throw fail('Удалённый аккаунт нельзя восстановить',409);
     const blocked=action==='block'?clock():null;if(!!user.blocked_at===!!blocked)return {ok:true,repeated:true};run('UPDATE users SET blocked_at=?,blocked_reason=? WHERE id=?',blocked,blocked?r:'',id);
     audit(actor,'user',id,action,{blockedAt:user.blocked_at},{blockedAt:blocked},r);
     if(blocked){run('DELETE FROM sessions WHERE user_id=?',id);run("UPDATE push_outbox SET status='cancelled' WHERE subscription_id IN (SELECT id FROM push_subscriptions WHERE user_id=?) AND status IN ('pending','retry','sending')",id);run('UPDATE push_subscriptions SET active=0 WHERE user_id=?',id)}

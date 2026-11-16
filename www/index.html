@@ -66,10 +66,10 @@
     function loadApp(){
       status('Запускаем приложение…');
       var script=document.createElement('script');
-      script.src='/app.js?v=features-v5';
+      script.src='/app.js?v=privacy-v6';
       script.onload=ready;
       script.onerror=function(){fail('Не удалось загрузить app.js. Проверьте подключение.')};
-      var features=document.createElement('script');features.src='/features-v5.js?v=features-v5';features.onload=function(){document.body.appendChild(script)};features.onerror=function(){fail('Не удалось загрузить приложение. Повторите попытку.')};document.body.appendChild(features);
+      var features=document.createElement('script');features.src='/features-v5.js?v=privacy-v6';features.onload=function(){document.body.appendChild(script)};features.onerror=function(){fail('Не удалось загрузить приложение. Повторите попытку.')};document.body.appendChild(features);
     }
     function start(){
       if(started)return;

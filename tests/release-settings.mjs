@@ -1,0 +1,11 @@
+import assert from 'node:assert/strict';
+import {releaseSettings} from '../scripts/check-release-settings.mjs';
+import {clientConfig} from '../server/client-config.mjs';
+const result=releaseSettings({GEOCODING_PROVIDER:'yandex',YANDEX_RASP_API_KEY:'fixture-private-key',RUSTORE_PUSH_SERVICE_TOKEN:'fixture-service-token'});
+assert.equal(result.settingsComplete,false);assert(result.missing.includes('raspTerms'));assert(result.missing.includes('geocoderUsage'));assert(result.missing.includes('previousSigner'));assert(!JSON.stringify(result).includes('fixture-private-key'));assert(!JSON.stringify(result).includes('fixture-service-token'));
+assert.equal(releaseSettings({GEOCODING_PROVIDER:'yandex',GEOCODING_LICENSE_CONFIRMED:'true'}).checks.geocoderUsage,false,'a checkbox alone is not license evidence');
+assert.equal(releaseSettings({RASP_DAILY_LIMIT:'1.5'}).checks.raspQuota,false);
+const ads={ADS_ENABLED:'true',ADS_TERMS_CONFIRMED:'true',ADS_WEB_SEARCH_ID:'fixture-slot'};
+assert.equal(clientConfig(ads).ads.enabled,false,'ad SDK must not initialize before actual operator/policy settings');assert.equal(clientConfig(ads).ads.web[0].id,'');
+assert.equal(clientConfig({...ads,PRIVACY_POLICY_APPROVED:'true',PRIVACY_OPERATOR:'Fixture operator',PRIVACY_CONTACT:'test@example.invalid'}).ads.enabled,true);
+console.log('PASS: read-only release prerequisite check distinguishes settings from real signing/device/license evidence; no secrets in output');

@@ -18,6 +18,7 @@ import {rideSeries} from './ride-series.mjs';
 import {safeTicketUrl,prepareTimetableCache,timetables} from './timetables.mjs';
 import {clientConfig} from './client-config.mjs';
 import {adminMfa} from './admin-mfa.mjs';
+import {accountPrivacy} from './account-privacy.mjs';
 import {migrateRouting} from './migrations-v4.mjs';
 import {routing} from './routing.mjs';
 import {adminApi} from './admin-api.mjs';
@@ -56,6 +57,7 @@ CREATE INDEX IF NOT EXISTS ix_messages_ride ON messages(ride_id);
 await migrateLifecycle(database,DATA);
 await migrateRouting(database,DATA);
 await migrateFeatures(database,DATA);
+const privacy=await accountPrivacy(database,DATA);
 const roadRouter=routing(database);
 const pushTransport=createPush();
 const life=lifecycle(database,{pushAvailable:pushTransport.available});
@@ -65,7 +67,7 @@ const series=rideSeries(life,roadRouter),buses=timetables(database,{cacheDb:busC
 let stopping=false,pushInFlight=null;
 function background(){
  if(stopping)return;
- try{buses.purgeExpired();life.tick()}catch{console.error('[lifecycle-worker] failed; see protected worker state')}
+ try{buses.purgeExpired();privacy.purgeMedia();life.tick()}catch{console.error('[lifecycle-worker] failed; see protected worker state')}
  if(pushInFlight)return;
  pushInFlight=processPush(life,pushTransport,{shouldStop:()=>stopping}).catch(()=>{life.run("UPDATE background_state SET last_error='Worker failed' WHERE name='push'");console.error('[push-worker] failed')}).finally(()=>{pushInFlight=null});
 }
@@ -128,7 +130,7 @@ function checkRate(ip){
 }
 function notify(recipient,title,message,rideId='',kind='legacy',targetPath=''){const id=uid();run('INSERT INTO notifications(id,recipient_id,title,message,ride_id,read,created,target_path,kind) VALUES(?,?,?,?,?,?,?,?,?)',id,recipient,title,message,rideId,0,now(),targetPath||(rideId?'/ride/'+rideId:'/notifications'),kind);life.enqueueExisting(id)}
 function transaction(fn){database.exec('BEGIN IMMEDIATE');try{const val=fn();database.exec('COMMIT');return val}catch(err){database.exec('ROLLBACK');throw err}}
-function getActor(req){const token=requestToken(req);if(!token)return null;return q('SELECT u.* FROM users u INNER JOIN sessions s ON s.user_id=u.id WHERE s.token_hash=? AND s.expires>? AND u.blocked_at IS NULL',sha(token),now())||null;}
+function getActor(req){const token=requestToken(req);if(!token)return null;const actor=q('SELECT u.* FROM users u INNER JOIN sessions s ON s.user_id=u.id WHERE s.token_hash=? AND s.expires>? AND u.blocked_at IS NULL',sha(token),now());return actor&&!privacy.isUnavailable(actor.id)?actor:null;}
 function requireActor(req){const actor=getActor(req);if(!actor)throw jsonError('Необходим вход в аккаунт',401);return actor;}
 function requireAdmin(actor){if(actor.role!=='admin')throw jsonError('Нет прав администратора',403)}
 function loggedIn(actor,req,res){const token=crypto.randomBytes(32).toString('base64url');run('INSERT INTO sessions(token_hash,user_id,expires) VALUES(?,?,?)',sha(token),actor.id,now()+SESSION_MS);const cookie=req.headers['x-po-puti-session']==='cookie';if(cookie)res.setHeader('set-cookie',sessionCookie(token));return {...(cookie?{}:{token}),user:{id:actor.id,username:actor.username,role:actor.role}}}
@@ -150,6 +152,10 @@ function checkedPhoto(value, maxBytes){
  return value;
 }
 async function storePhoto(value,maxBytes,ownerId){
+ if(ownerId)return privacy.withUserLock(ownerId,()=>{if(privacy.isUnavailable(ownerId)||q('SELECT blocked_at FROM users WHERE id=?',ownerId)?.blocked_at)throw jsonError('Аккаунт недоступен',401);return storePhotoUnlocked(value,maxBytes,ownerId)});
+ return storePhotoUnlocked(value,maxBytes,ownerId);
+}
+async function storePhotoUnlocked(value,maxBytes,ownerId){
  if(!value)return '';
  if(typeof value==='string' && /^\/uploads\/[a-f0-9]{32}\.(?:jpg|png|webp)$/.test(value)){if(ownerId&&!q('SELECT 1 FROM media_files WHERE url=? AND owner_id=?',value,ownerId)&&!q('SELECT 1 FROM users WHERE id=? AND photo=?',ownerId,value)&&!q('SELECT 1 FROM rides WHERE driver_id=? AND photo=?',ownerId,value))throw jsonError('Это не ваше фото',403);return value;}
  let data=checkedPhoto(value,maxBytes);
@@ -253,7 +259,7 @@ async function handleApi(req,res,path,data){const method=req.method;
  if(path==='/api/login' && method==='POST'){
    checkRate(clientIp(req));if(!passwordValid(data.password))throw jsonError('Неверный логин или пароль',401);const uname=clean(data.username,33).toLowerCase();const user=q('SELECT * FROM users WHERE username=?',uname);
    const salt=user?.salt||'no-user-salt',expected=user?.hash||'0'.repeat(128),actual=await boundedHash(data.password,salt);
-   if(user?.blocked_at)throw jsonError('Аккаунт заблокирован',403);
+   if(user?.blocked_at||user&&privacy.isUnavailable(user.id))throw jsonError('Аккаунт заблокирован',403);
    if(!user||!crypto.timingSafeEqual(Buffer.from(expected,'hex'),Buffer.from(actual,'hex')))throw jsonError('Неверный логин или пароль',401);
    if(user.role==='admin'&&mfa.get(user.id)?.enabled)mfa.verify(user.id,data.mfaCode);
    const session=loggedIn(user,req,res);if(user.role==='admin'&&mfa.get(user.id)?.enabled)run('INSERT OR REPLACE INTO session_mfa VALUES(?,?)',sha(session.token||String(res.getHeader('set-cookie')).split(';')[0].split('=')[1]),now());return session;
@@ -271,6 +277,16 @@ async function handleApi(req,res,path,data){const method=req.method;
  if(path==='/api/admin/mfa/verify'&&method==='POST'){requireAdmin(actor);checkRate('mfa:'+actor.id);mfa.verify(actor.id,data.code,true);run('INSERT OR REPLACE INTO session_mfa VALUES(?,?)',sha(requestToken(req)),now());life.audit(actor,'user',actor.id,'mfa_verified',{}, {verified:true},'Администратор подтвердил MFA');return {ok:true}}
  if(path==='/api/privacy/consent'&&method==='POST'){if(typeof data.granted!=='boolean'||data.category!=='advertising')throw jsonError('Неверное согласие');run('INSERT INTO privacy_consents VALUES(?,?,?,?,?) ON CONFLICT(user_id,category) DO UPDATE SET version=excluded.version,granted=excluded.granted,updated_at=excluded.updated_at',actor.id,data.category,clientConfig().privacy.policyVersion,Number(data.granted),now());return {ok:true}}
  if(path==='/api/account/deletion-request'&&method==='POST'){if(data.confirmation!=='DELETE_MY_ACCOUNT')throw jsonError('Подтвердите запрос удаления аккаунта');run('INSERT OR IGNORE INTO deletion_requests VALUES(?,?,?)',actor.id,now(),'pending');return {ok:true,status:'pending',message:'Запрос зарегистрирован. Данные не удаляются до применения согласованной политики хранения.'}}
+ if(path==='/api/account/delete'&&method==='POST'){
+  checkRate('erase:'+actor.id);
+  if(actor.role==='admin'&&(mfa.required()||mfa.get(actor.id)?.enabled)){const verified=q('SELECT verified_at FROM session_mfa WHERE token_hash=?',sha(requestToken(req)))?.verified_at;if(!verified||now()-verified>8*3600000)throw jsonError('Требуется подтверждение MFA',403);}
+  if(data.confirmation!=='DELETE_MY_ACCOUNT'||(data.userId!==undefined&&data.userId!==actor.id))throw jsonError('Подтвердите удаление своего аккаунта');
+  if(!passwordValid(data.password))throw jsonError('Повторно введите пароль',401);
+  const hash=await boundedHash(data.password,actor.salt);
+  if(!crypto.timingSafeEqual(Buffer.from(hash,'hex'),Buffer.from(actor.hash,'hex')))throw jsonError('Неверный пароль',401);
+  requireActor(req);const result=await privacy.erase(actor.id);
+  res.setHeader('set-cookie',[sessionCookie(''),'poputi_session=; Path=/api; HttpOnly; SameSite=Strict; Max-Age=0'+(PUBLIC_ORIGIN?'; Secure':'')]);return result;
+ }
  if(path==='/api/series'&&method==='GET')return series.list(actor);
  const seriesAction=path.match(/^\/api\/series\/([^/]+)\/(cancel|update)$/);if(seriesAction&&method==='POST'){checkRate('series-edit:'+actor.id);return seriesAction[2]==='cancel'?series.cancel(actor,seriesAction[1]):series.update(actor,seriesAction[1],data)}
  if(path==='/api/search/places'&&method==='GET'){checkRate('rasp-places:'+actor.id);return buses.places(params.get('q'))}
@@ -305,6 +321,7 @@ async function handleApi(req,res,path,data){const method=req.method;
    if(!name)throw jsonError('Укажите имя');
    if(phone&&!/^[+\d ()-]{7,24}$/.test(phone))throw jsonError('Неверный формат телефона');
    const photo=Object.hasOwn(data,'photo')?await storePhoto(data.photo,300000,actor.id):actor.photo||'';
+   requireActor(req);
    run('UPDATE users SET name=?,car=?,phone=?,photo=? WHERE id=?',name,car,phone,photo,actor.id);return {ok:true};
  }
  if((path==='/api/rides'||path==='/api/series')&&method==='POST'){
@@ -380,9 +397,11 @@ async function serveStatic(req,res,pathname){
  if(path.startsWith('/uploads/')){
    const name=path.slice('/uploads/'.length);
    if(!/^[a-f0-9]{32}\.(?:jpg|png|webp)$/.test(name))throw jsonError('Файл не найден',404);
+   if(privacy.isErasedMedia(path))throw jsonError('Файл удалён',410);
    const file=join(UPLOADS,name);if(!existsSync(file))throw jsonError('Файл не найден',404);
    const body=await readFile(file),type=name.endsWith('.jpg')?'image/jpeg':name.endsWith('.png')?'image/png':'image/webp';
-   res.writeHead(200,{'content-type':type,'cache-control':'public, max-age=31536000, immutable','x-content-type-options':'nosniff','content-length':body.length});res.end(req.method==='HEAD'?undefined:body);return;
+   if(privacy.isErasedMedia(path))throw jsonError('Файл удалён',410);
+   res.writeHead(200,{'content-type':type,'cache-control':'private, no-store','x-content-type-options':'nosniff','content-length':body.length});res.end(req.method==='HEAD'?undefined:body);return;
  }
  const file=resolve(WEB,'.'+path);
  if(!file.startsWith(WEB+sep))throw jsonError('Доступ запрещён',403);
