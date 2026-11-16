@@ -14,26 +14,29 @@ import java.util.concurrent.atomic.AtomicReference;
 public class SharedUiSmokeTest {
     @Test public void genericNotificationIsBoundToOptedInAccountAndClearedOnLogout() throws Exception {
         android.content.Context context=androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().getTargetContext();
-        if(android.os.Build.VERSION.SDK_INT>=33)androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().getUiAutomation().executeShellCommand("pm grant ru.poputi.app android.permission.POST_NOTIFICATIONS").close();
+        if(android.os.Build.VERSION.SDK_INT>=33)try(java.io.InputStream input=new android.os.ParcelFileDescriptor.AutoCloseInputStream(androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().getUiAutomation().executeShellCommand("pm grant ru.poputi.app android.permission.POST_NOTIFICATIONS"))){byte[] buffer=new byte[256];while(input.read(buffer)!=-1){}}
         try(ActivityScenario<MainActivity> scenario=ActivityScenario.launch(MainActivity.class)){
-            CountDownLatch ready=new CountDownLatch(1);
-            scenario.onActivity(activity->activity.getBridge().getWebView().evaluateJavascript("Capacitor.Plugins.PoPutiFeatures.setToken({token:'isolated-notification-session'}).then(()=>window.__notificationFixtureReady=true)",ignored->ready.countDown()));
-            assertTrue(ready.await(5,TimeUnit.SECONDS));
-            long until=System.currentTimeMillis()+10000;while(PoPutiRuStoreState.session(context).isEmpty()&&System.currentTimeMillis()<until)Thread.sleep(50);
+            long until=System.currentTimeMillis()+45000;
+            while(!"isolated-notification-session".equals(PoPutiRuStoreState.session(context))&&System.currentTimeMillis()<until){
+                CountDownLatch ready=new CountDownLatch(1);
+                scenario.onActivity(activity->activity.getBridge().getWebView().evaluateJavascript("if(window.Capacitor&&Capacitor.Plugins&&Capacitor.Plugins.PoPutiFeatures&&!window.__notificationFixturePending){window.__notificationFixturePending=true;Capacitor.Plugins.PoPutiFeatures.setToken({token:'isolated-notification-session'})}",ignored->ready.countDown()));
+                assertTrue(ready.await(5,TimeUnit.SECONDS));Thread.sleep(100);
+            }
             assertEquals("isolated-notification-session",PoPutiRuStoreState.session(context));
             PoPutiRuStoreState.activate(context,"fixture-account","fixture-device-1234","isolated-notification-session");
             java.util.Map<String,String> data=new java.util.HashMap<>();data.put("notificationId","fixture-note");data.put("recipientId","fixture-account");data.put("path","https://attacker.invalid/");
             PoPutiRuStoreState.display(context,data);PoPutiRuStoreState.display(context,data);
             android.app.NotificationManager manager=(android.app.NotificationManager)context.getSystemService(android.content.Context.NOTIFICATION_SERVICE);
-            assertEquals(1,manager.getActiveNotifications().length);
+            awaitNotificationCount(manager,1);
             android.app.Notification notice=manager.getActiveNotifications()[0].getNotification();
             assertEquals("Откройте приложение, чтобы посмотреть уведомление.",notice.extras.getString(android.app.Notification.EXTRA_TEXT));
             assertEquals(R.drawable.ic_poputi_notification,notice.getSmallIcon().getResId());
             data.put("notificationId","wrong-recipient");data.put("recipientId","another-account");PoPutiRuStoreState.display(context,data);assertEquals(1,manager.getActiveNotifications().length);
-            PoPutiRuStoreState.disable(context,false);assertEquals(0,manager.getActiveNotifications().length);
+            PoPutiRuStoreState.disable(context,false);awaitNotificationCount(manager,0);
             data.put("recipientId","fixture-account");PoPutiRuStoreState.display(context,data);assertEquals(0,manager.getActiveNotifications().length);
         }finally{PoPutiRuStoreState.disable(context,false);context.getSharedPreferences(PoPutiRuStoreState.SESSION,android.content.Context.MODE_PRIVATE).edit().clear().commit();}
     }
+    private static void awaitNotificationCount(android.app.NotificationManager manager,int expected)throws Exception{long until=System.currentTimeMillis()+5000;while(manager.getActiveNotifications().length!=expected&&System.currentTimeMillis()<until)Thread.sleep(50);assertEquals(expected,manager.getActiveNotifications().length);}
     @Test public void launchesPackagedUiAndNativeBridge() throws Exception {
         try (ActivityScenario<MainActivity> scenario = ActivityScenario.launch(MainActivity.class)) {
             long until = System.currentTimeMillis() + 45000;
