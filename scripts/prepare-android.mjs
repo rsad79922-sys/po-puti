@@ -2,6 +2,7 @@ import {readFile,writeFile,copyFile,mkdir} from 'node:fs/promises';
 const folder='android/app/src/main/java/ru/poputi/app';await mkdir(folder,{recursive:true});
 await copyFile('native/android/PoPutiFeaturesPlugin.java',folder+'/PoPutiFeaturesPlugin.java');
 for(const name of ['PoPutiApplication','PoPutiPushPolicy','PoPutiRuStoreState','PoPutiRuStoreMessagingService','PoPutiRuStorePushPlugin'])await copyFile('native/android/'+name+'.java',folder+'/'+name+'.java');
+await mkdir('android/app/src/main/res/drawable',{recursive:true});await copyFile('native/android/ic_poputi_notification.xml','android/app/src/main/res/drawable/ic_poputi_notification.xml');
 await writeFile(folder+'/MainActivity.java',`package ru.poputi.app;
 import android.os.Bundle;
 import com.getcapacitor.BridgeActivity;

@@ -59,7 +59,7 @@ public final class PoPutiRuStoreState {
    Intent intent=new Intent(context,MainActivity.class).setAction("ru.poputi.app.NOTIFICATION."+id).putExtra(PATH,path).putExtra(RECIPIENT,userId).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP|Intent.FLAG_ACTIVITY_SINGLE_TOP);
    PendingIntent content=PendingIntent.getActivity(context,id.hashCode(),intent,PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);
    channel(context);NotificationManager manager=(NotificationManager)context.getSystemService(Context.NOTIFICATION_SERVICE);if(manager==null)return;
-   Notification notification=new NotificationCompat.Builder(context,CHANNEL).setSmallIcon(context.getApplicationInfo().icon).setContentTitle("По пути — новое уведомление").setContentText("Откройте приложение, чтобы посмотреть уведомление.").setVisibility(NotificationCompat.VISIBILITY_PRIVATE).setAutoCancel(true).setContentIntent(content).build();
+   Notification notification=new NotificationCompat.Builder(context,CHANNEL).setSmallIcon(R.drawable.ic_poputi_notification).setContentTitle("По пути — новое уведомление").setContentText("Откройте приложение, чтобы посмотреть уведомление.").setVisibility(NotificationCompat.VISIBILITY_PRIVATE).setAutoCancel(true).setContentIntent(content).build();
    try{manager.notify(id,0,notification);seen.add(id);while(seen.size()>100)seen.remove(seen.iterator().next());prefs(context).edit().putStringSet("seen",seen).apply();}catch(SecurityException ignored){}
   }
  }
