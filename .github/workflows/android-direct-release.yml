@@ -125,6 +125,10 @@ jobs:
           disable-animations: true
           script: |
             adb install --no-streaming -r out/po-puti-release.apk
+            adb shell am start -W -n ru.poputi.app/.MainActivity
+            sleep 3
+            adb shell pidof ru.poputi.app
+            adb shell am force-stop ru.poputi.app
             adb install --no-streaming -r -t out/signed-test.apk
             adb shell am instrument -w -r -e class ru.poputi.app.SignedReleaseFlowTest -e expectedVersionCode "$ANDROID_VERSION_CODE" ru.poputi.app.test/androidx.test.runner.AndroidJUnitRunner > out/android-15-test.txt
             node scripts/check-android-instrumentation.mjs out/android-15-test.txt
@@ -139,6 +143,10 @@ jobs:
           script: |
             python3 -c 'import subprocess; assert "package:" not in subprocess.check_output(["adb","shell","pm","list","packages","com.google.android.gms"]).decode()'
             adb install --no-streaming -r out/po-puti-release.apk
+            adb shell am start -W -n ru.poputi.app/.MainActivity
+            sleep 3
+            adb shell pidof ru.poputi.app
+            adb shell am force-stop ru.poputi.app
             adb install --no-streaming -r -t out/signed-test.apk
             adb shell am instrument -w -r -e class ru.poputi.app.SignedReleaseFlowTest -e expectedVersionCode "$ANDROID_VERSION_CODE" ru.poputi.app.test/androidx.test.runner.AndroidJUnitRunner > out/android-11-test.txt
             node scripts/check-android-instrumentation.mjs out/android-11-test.txt
