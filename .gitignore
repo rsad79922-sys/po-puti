@@ -10,6 +10,9 @@ server-data/
 privacy-erasure.jsonl
 *.jks
 *.keystore
+*.p12
+*.pfx
+store-password
 *.apk
 *.aab
 *.pem

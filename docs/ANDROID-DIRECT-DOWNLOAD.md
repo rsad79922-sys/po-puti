@@ -25,21 +25,17 @@ ANDROID_DOWNLOAD_URL=https://vputipoputka.ru/downloads/po-puti.apk
 перекрывает подачу заявки. Скачивание начинается исключительно по нажатию;
 открытая поездка остаётся на месте. Service Worker не обрабатывает `/downloads/`.
 
-## Статус APK на момент проверки 18.11.2026
+## Получение подписанного APK
 
-В доступном рабочем пространстве найдены только два отладочных APK.
-Все 258 доступных артефактов GitHub Actions проверены по метаданным: Android APK
-есть только в `po-puti-android-debug`; готовых релизных APK/AAB и GitHub Releases
-нет. Workflow Android проверяет также unsigned release, но не подписывает и не
-публикует его. Готового подписанного релизного APK сейчас нет.
+Релиз для прямого скачивания собирает отдельный workflow
+`android-direct-release.yml`: версия первого прямого выпуска **1.0.1 (4)**,
+пакет `ru.poputi.app`. Постоянный ключ создаётся и используется только в закрытом
+каталоге VPS. GitHub получает подписанный APK и публичный сертификат.
 
-В проекте не настроена доступная релизная подпись. Нельзя подменять её debug
-ключом или молча создавать другую подпись: обновление уже установленного APK
-потребует прежний сертификат. От владельца нужен **либо готовый подписанный
-релизный APK, либо доступ к релизному keystore, его alias и паролям через
-защищённое хранилище/Secrets**. Значения ключей/паролей в переписку не отправлять.
-Согласование RuStore, ключ Расписаний и настройки рекламы для этой задачи
-не требуются. Существующий `YANDEX_RASP_API_KEY` не меняется.
+[Расположение ключа, резервная копия, повторная сборка и проверки Android](ANDROID-SIGNING.md).
+Заявка RuStore **1.0.0 (3)** остаётся без изменений. Новая подпись не позволяет
+обновить APK, подписанный другим ключом; существующие данные не удаляются ради
+обхода этого ограничения. Одобрение RuStore для прямого скачивания не требуется.
 
 ## Подготовка релизного APK
 
@@ -74,15 +70,16 @@ APK. Проверить установку/обновление на устро�
 временный `/root/po-puti-release.apk`. Затем в консоли VPS:
 
 ```bash
-sudo install -d -o poputi -g poputi -m 0700 /var/lib/po-puti/downloads
-sudo install -o poputi -g poputi -m 0600 /root/po-puti-release.apk /var/lib/po-puti/downloads/po-puti.apk.next
-sudo mv /var/lib/po-puti/downloads/po-puti.apk.next /var/lib/po-puti/downloads/po-puti.apk
+sudo install -d -o root -g poputi -m 0750 /var/lib/po-puti-downloads
+sudo install -o root -g poputi -m 0640 /root/po-puti-release.apk /var/lib/po-puti-downloads/po-puti.apk.next
+sudo mv /var/lib/po-puti-downloads/po-puti.apk.next /var/lib/po-puti-downloads/po-puti.apk
 curl --fail --head https://vputipoputka.ru/downloads/po-puti.apk
 ```
 
 Публичный адрес: **https://vputipoputka.ru/downloads/po-puti.apk**. Файл хранится
-вне checkout и не теряется при выпуске кода. При другом `DATA_DIR` использовать
-его подкаталог `downloads/po-puti.apk`. Выдаётся только этот точный путь; каталог,
+вне checkout и не теряется при выпуске кода. Задайте `ANDROID_APK_DIR=/var/lib/po-puti-downloads`, чтобы
+раздача находилась вне каталога данных, доступного приложению для записи.
+Без этой настройки сохраняется совместимость с `DATA_DIR/downloads/po-puti.apk`. Выдаётся только этот точный путь; каталог,
 кандидат `.next`, БД, резервные копии и ключи остаются недоступны через HTTP.
 Ответ: APK MIME, `Content-Disposition: attachment`, `Content-Length`, `no-store`,
 GET/HEAD. Отсутствующий/пустой файл возвращает 404. Ключи подписи на сервер
@@ -111,6 +108,5 @@ GET/HEAD. Отсутствующий/пустой файл возвращает 
 удаляется после проверки и не устанавливается в системное хранилище доверия.
 Android CI проверяет упакованный WebView: баннер внутри APK недоступен.
 
-Без релизного keystore/готового APK недоступны только подпись, установка
-пользовательского релиза и включение реального скачивания. Сайт и проверки
-можно выпускать с пустым `ANDROID_DOWNLOAD_URL` независимо от RuStore.
+Пока `ANDROID_DOWNLOAD_URL` пуст, баннер скрыт. Workflow прямого выпуска может
+включить ссылку только после проверки подписи и сценариев на двух Android-эмуляторах.

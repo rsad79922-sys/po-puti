@@ -30,6 +30,7 @@ const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const WEB = resolve(ROOT, 'www');
 const DATA = resolve(process.env.DATA_DIR || join(ROOT, 'server-data'));
 const UPLOADS = join(DATA, 'uploads');
+const APK_DOWNLOADS = resolve(process.env.ANDROID_APK_DIR || join(DATA,'downloads'));
 await mkdir(DATA, {recursive:true, mode:0o700});
 await mkdir(UPLOADS, {recursive:true, mode:0o700});
 const database = new DatabaseSync(join(DATA,'po-puti.sqlite'));
@@ -395,7 +396,7 @@ async function serveStatic(req,res,pathname){
  let path=pathname==='/'?'/index.html':pathname;
  try{path=decodeURIComponent(path)}catch{throw jsonError('Неверный путь',400)}
  if(path==='/downloads/po-puti.apk'){
-  if(!await serveAndroidApk(req,res,join(DATA,'downloads','po-puti.apk')))throw jsonError('APK пока не опубликован',404);
+  if(!await serveAndroidApk(req,res,join(APK_DOWNLOADS,'po-puti.apk')))throw jsonError('APK пока не опубликован',404);
   return;
  }
  if(path==='/admin'||path==='/admin/'){const actor=requireActor(req);requireAdmin(actor)}

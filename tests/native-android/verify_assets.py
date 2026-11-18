@@ -2,7 +2,8 @@
 from pathlib import Path
 from zipfile import ZipFile
 import hashlib
-apk = Path('android/app/build/outputs/apk/debug/app-debug.apk')
+import sys
+apk = Path(sys.argv[1] if len(sys.argv) > 1 else 'android/app/build/outputs/apk/debug/app-debug.apk')
 files = sorted(p for p in Path('www').rglob('*') if p.is_file() and not any(part.startswith('.') for part in p.relative_to('www').parts))
 with ZipFile(apk) as package:
     for path in files:

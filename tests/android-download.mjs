@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
-import {readFile,mkdir,writeFile,rename,unlink,symlink} from 'node:fs/promises';
+import {readFile,mkdir,writeFile,rename,unlink,symlink,mkdtemp,rm} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 import vm from 'node:vm';
 import {clientConfig,androidDownloadUrl} from '../server/client-config.mjs';
 import {isolatedServer} from './helpers/server.mjs';
@@ -38,3 +40,10 @@ try{
  assert.equal((await fetch(url,{method:'POST'})).status,405,'HTTP must not support APK upload or replacement');
  console.log('PASS: one HTTPS download setting, safe public config, streamed APK/HEAD, atomic replacement, no directory/private-file exposure, SW bypass');
 }finally{await app.stop()}
+const protectedDir=await mkdtemp(join(tmpdir(),'poputi-apk-distribution-')),secured=await isolatedServer({ANDROID_APK_DIR:protectedDir});
+try{
+ await writeFile(join(protectedDir,'po-puti.apk'),'protected distribution fixture');
+ await mkdir(secured.dir+'/downloads');await writeFile(secured.dir+'/downloads/po-puti.apk','stale app-owned fixture');
+ const response=await fetch(secured.base+'/downloads/po-puti.apk');assert.equal(response.status,200);assert.equal(await response.text(),'protected distribution fixture','configured APK directory must take precedence over app-writable data');
+ console.log('PASS: APK distribution can live outside the web application writable data directory');
+}finally{await secured.stop();await rm(protectedDir,{recursive:true,force:true})}
