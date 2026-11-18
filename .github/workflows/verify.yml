@@ -29,6 +29,11 @@ jobs:
   browsers:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    # Match the locked Playwright version; browsers and Ubuntu libraries are
+    # already present, avoiding regional apt mirror delays on every CI job.
+    container:
+      image: mcr.microsoft.com/playwright:v1.65.1-noble@sha256:1507cbfc550a63a6b7396791ca4f00df17beb56342d2447b3f106c306f525579
+      options: --ipc=host
     strategy:
       fail-fast: false
       matrix:
@@ -40,12 +45,6 @@ jobs:
           node-version: '24'
           cache: npm
       - run: npm ci --ignore-scripts
-      - name: Use the official Ubuntu archive when the runner has the slow EC2 mirror
-        run: |
-          if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then
-            sudo sed -E -i 's|https?://[a-z0-9-]+\.ec2\.archive\.ubuntu\.com/ubuntu/?|https://archive.ubuntu.com/ubuntu|g' /etc/apt/sources.list.d/ubuntu.sources
-          fi
-      - run: npx playwright install --with-deps ${{ matrix.engine }}
       - name: Real browser flows, cookie security, photo upload and PWA offline recovery
         env:
           BROWSER_ENGINE: ${{ matrix.engine }}
