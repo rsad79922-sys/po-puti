@@ -33,3 +33,6 @@
 .weekdays label {display:flex;gap:4px;align-items:center}
 .weekdays input {width:auto}
 .privacy-ads {margin:20px 0;font-size:14px}
+/* Three search filters remain on one row on narrow screens. */
+.segmented[aria-label="Тип поездки"]{display:flex;flex-wrap:nowrap}
+.segmented[aria-label="Тип поездки"]>button{flex:1;min-width:0;padding:12px 4px;font-size:14px}
