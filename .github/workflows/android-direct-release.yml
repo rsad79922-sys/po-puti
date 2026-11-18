@@ -41,6 +41,11 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
+      - name: Prepare Android SDK, platform-tools and pinned signing/alignment tools
+        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407
+        with:
+          packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
+          log-accepted-android-sdk-licenses: false
       - name: Validate the separate direct-release version
         run: |
           test "$GITHUB_REF" = refs/heads/main
@@ -68,7 +73,6 @@ jobs:
       - name: Align release binaries for Android native-library page sizes
         run: |
           set -euo pipefail
-          sdkmanager 'build-tools;35.0.0' > /dev/null
           mkdir -p out
           tools="$ANDROID_HOME/build-tools/35.0.0"
           "$tools/zipalign" -P 16 -f 4 android/app/build/outputs/apk/release/app-release-unsigned.apk out/release-aligned.apk
