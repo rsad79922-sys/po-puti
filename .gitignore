@@ -10,6 +10,8 @@ server-data/
 privacy-erasure.jsonl
 *.jks
 *.keystore
+*.apk
+*.aab
 *.pem
 .DS_Store
 *.log

@@ -45,7 +45,7 @@ public class SharedUiSmokeTest {
                 CountDownLatch done = new CountDownLatch(1);
                 AtomicReference<String> result = new AtomicReference<>("");
                 scenario.onActivity(activity -> activity.getBridge().getWebView().evaluateJavascript(
-                    "JSON.stringify({ready:!!document.getElementById('reg-username'),platform:window.Capacitor&&Capacitor.getPlatform(),push:!!(window.Capacitor&&Capacitor.isPluginAvailable('PushNotifications')),title:document.title})",
+                    "JSON.stringify({ready:!!document.getElementById('reg-username'),platform:window.Capacitor&&Capacitor.getPlatform(),push:!!(window.Capacitor&&Capacitor.isPluginAvailable('PushNotifications')),downloadBannerEligible:typeof androidBrowserDownloadEligible==='function'&&androidBrowserDownloadEligible(),title:document.title})",
                     answer -> { result.set(answer); done.countDown(); }
                 ));
                 assertTrue("WebView callback must complete", done.await(5, TimeUnit.SECONDS));
@@ -55,6 +55,7 @@ public class SharedUiSmokeTest {
             }
             assertTrue("Packaged login UI must render: " + value, value.contains("\"ready\":true"));
             assertTrue("Real Capacitor bridge must report Android: " + value, value.contains("\"platform\":\"android\""));
+            assertTrue("Installed APK must hide the browser download banner: " + value, value.contains("\"downloadBannerEligible\":false"));
             assertTrue("Native push plugin must be registered: " + value, value.contains("\"push\":true"));
             CountDownLatch rustoreCheck = new CountDownLatch(1);
             AtomicReference<String> rustoreValue = new AtomicReference<>("");

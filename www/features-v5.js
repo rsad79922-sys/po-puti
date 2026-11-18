@@ -1,4 +1,52 @@
 /* Shared feature controllers. No provider keys, private tokens or business rules live here. */
+// A public link only: no auto-download, app launch, auth token or trip redirect.
+const androidDownloadState={url:'',requested:false,dismissed:false,pending:null};
+const androidDownloadDismissKey='po-puti-android-download-dismissed-v1';
+function androidBrowserDownloadEligible(){
+ const ua=navigator.userAgent||'';
+ if(!/Android/i.test(ua)||/iPhone|iPad|iPod|\bwv\b/i.test(ua)||(/Macintosh/i.test(ua)&&navigator.maxTouchPoints>1))return false;
+ if(navigator.userAgentData?.platform&&navigator.userAgentData.platform!=='Android')return false;
+ if(window.Capacitor||navigator.standalone===true||document.referrer.startsWith('android-app://'))return false;
+ return !['standalone','fullscreen','minimal-ui','window-controls-overlay'].some(mode=>window.matchMedia?.('(display-mode: '+mode+')').matches);
+}
+function paintAndroidDownload(){
+ const host=document.querySelector('[data-android-download-host]');if(!host)return;
+ let dismissed=androidDownloadState.dismissed;
+ try{dismissed=dismissed||sessionStorage.getItem(androidDownloadDismissKey)==='true'}catch{}
+ if(dismissed||!androidDownloadState.url||!androidBrowserDownloadEligible()){host.replaceChildren();return}
+ const url=new URL(androidDownloadState.url);
+ host.innerHTML=`<aside class="android-download-banner" aria-label="Приложение для Android"><a class="android-download-link" href="${safe(url.href)}" target="_blank" rel="noopener noreferrer"${url.origin===location.origin&&url.pathname.endsWith('.apk')?' download="po-puti.apk"':''}>Скачать для Android</a><button type="button" class="android-download-close" data-android-download-close aria-label="Закрыть предложение скачать приложение">×</button></aside>`;
+ host.querySelector('[data-android-download-close]').addEventListener('click',()=>{
+  androidDownloadState.dismissed=true;
+  try{sessionStorage.setItem(androidDownloadDismissKey,'true')}catch{}
+  // Do not re-render the current form or change its URL when dismissing.
+  host.replaceChildren();
+ });
+}
+async function syncAndroidDownload(){
+ paintAndroidDownload();
+ if(androidDownloadState.requested)return androidDownloadState.pending;
+ if(!androidBrowserDownloadEligible()||(!window.PO_PUTI_BACKEND&&!window.PO_PUTI_API_BASE))return;
+ androidDownloadState.requested=true;
+ androidDownloadState.pending=(async()=>{
+ const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),5000);
+ try{
+  const response=await fetch((window.PO_PUTI_API_BASE||'').replace(/\/$/,'')+'/api/public-config',{credentials:'omit',cache:'no-store',signal:controller.signal});
+  if(!response.ok)return;
+  const config=await response.json();
+  if(typeof config.androidDownloadUrl!=='string'||!config.androidDownloadUrl.trim()||/[\u0000-\u0020\u007f\\]/.test(config.androidDownloadUrl))return;
+  const url=new URL(config.androidDownloadUrl);
+  if(url.protocol!=='https:'||url.username||url.password)return;
+  androidDownloadState.url=url.href;
+  paintAndroidDownload();
+ }catch{ /* Optional banner failure must never block the application. */ }
+ finally{clearTimeout(timer)}
+ })();
+ return androidDownloadState.pending;
+}
+for(const mode of ['standalone','fullscreen','minimal-ui','window-controls-overlay'])window.matchMedia?.('(display-mode: '+mode+')').addEventListener?.('change',paintAndroidDownload);
+window.addEventListener('pageshow',paintAndroidDownload);
+
 const preservedAdNodes=new Map();
 function preserveAds(){for(const node of document.querySelectorAll('[data-ad-slot]'))if(node.querySelector('iframe')||mountedAds.has(node.dataset.adSlot))preservedAdNodes.set(node.dataset.adSlot,node)}
 function restoreAds(){if(!featureState.consent){for(const node of preservedAdNodes.values())node.remove();preservedAdNodes.clear();return}for(const [name,node] of preservedAdNodes){const target=document.querySelector('[data-ad-slot="'+name+'"]');if(target&&node!==target)target.replaceWith(node)}}

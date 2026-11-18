@@ -57,3 +57,8 @@ npm run android:open
 Маршрутизация, IANA-зоны и единая приёмка v4: [UNIFIED-V4.md](docs/UNIFIED-V4.md).
 
 Выбран бесплатный собственный BRouter/OpenStreetMap; установка и ограничения описаны в [UNIFIED-V4.md](docs/UNIFIED-V4.md#выбранный-вариант-собственный-бесплатный-brouter).
+
+## Android напрямую с сайта
+
+Баннер и единая настройка скачивания: [инструкция](docs/ANDROID-DIRECT-DOWNLOAD.md).
+RuStore не требуется; `ANDROID_DOWNLOAD_URL` остаётся пустым до проверки подписанного APK.
