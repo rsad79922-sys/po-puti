@@ -1,17 +1,21 @@
 import assert from 'node:assert/strict';
+import {mkdir,writeFile,readFile} from 'node:fs/promises';
 import {chromium,webkit} from 'playwright';
 import {isolatedServer} from './helpers/server.mjs';
 import {roadFixture} from './helpers/road.mjs';
+import {loopbackHttps} from './helpers/https.mjs';
 
-const apkUrl='https://vputipoputka.ru/downloads/po-puti.apk',storeUrl='https://www.rustore.ru/catalog/app/ru.poputi.app';
+const tls=await loopbackHttps(),browserOrigin=tls.base,apkUrl=browserOrigin+'/downloads/po-puti.apk',storeUrl='https://www.rustore.ru/catalog/app/ru.poputi.app';
 const androidUA='Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Mobile Safari/537.36';
-const road=await roadFixture(),app=await isolatedServer({...road.env,ANDROID_DOWNLOAD_URL:apkUrl});
+const road=await roadFixture(),app=await isolatedServer({...road.env,PUBLIC_ORIGIN:browserOrigin,ANDROID_DOWNLOAD_URL:apkUrl});
+tls.forwardTo(app.base);
+const downloadFixture=Buffer.from('isolated download fixture');await mkdir(app.dir+'/downloads');await writeFile(app.dir+'/downloads/po-puti.apk',downloadFixture);
 let browser;
 const errors=[];
 try{
  const engine=process.env.BROWSER_ENGINE||'chromium';browser=await(engine==='webkit'?webkit:chromium).launch({headless:true,...(engine==='chromium'?{...(process.env.CHROMIUM_PATH?{executablePath:process.env.CHROMIUM_PATH}:{}),args:['--no-sandbox']}:{})});
  async function open({ua=androidUA,mode='',native=false,standalone=false,blockedStorage=false,downloadUrl=apkUrl,path='/',platform='',referrer=''}={}){
-  const context=await browser.newContext({userAgent:ua,viewport:{width:390,height:844}});
+  const context=await browser.newContext({userAgent:ua,viewport:{width:390,height:844},serviceWorkers:'block',ignoreHTTPSErrors:true});
   await context.addInitScript(options=>{
    if(options.native)window.Capacitor={getPlatform:()=> 'android',registerPlugin:()=>({addListener:async()=>{},removeAllDeliveredNotifications:async()=>{}})};
    if(options.mode){const original=window.matchMedia.bind(window);window.matchMedia=query=>query==='(display-mode: '+options.mode+')'?{matches:true,addEventListener(){}}:original(query)}
@@ -22,12 +26,11 @@ try{
   },{mode,native,standalone,blockedStorage,platform,referrer});
   // Use only this test's isolated API, including inside the native mock.
   await context.route('**/config.js?*',route=>route.fulfill({contentType:'text/javascript',body:'window.PO_PUTI_BACKEND=true;window.PO_PUTI_API_BASE="";'}));
-  let downloads=0,publicRequests=0;
-  await context.route(apkUrl,route=>{downloads++;return route.fulfill({contentType:'application/vnd.android.package-archive',headers:{'content-disposition':'attachment; filename="po-puti.apk"'},body:Buffer.from('isolated download fixture')})});
-  await context.route('**/api/public-config',async route=>{publicRequests++;const response=await route.fetch(),config=await response.json();return route.fulfill({response,json:{...config,androidDownloadUrl:downloadUrl}})});
+  const initialDownloads=tls.downloads();let publicRequests=0;
+  await context.route('**/api/public-config',async route=>{publicRequests++;const response=await route.fetch({url:app.base+'/api/public-config'}),config=await response.json();return route.fulfill({response,json:{...config,androidDownloadUrl:downloadUrl}})});
   const page=await context.newPage();page.on('pageerror',error=>errors.push(error.message));
-  await page.goto(app.base+path);await page.locator('#login-form').waitFor();await page.waitForFunction(()=>!document.querySelector('#boot'));
-  return {context,page,downloads:()=>downloads,publicRequests:()=>publicRequests};
+  await page.goto(browserOrigin+path);await page.locator('#login-form').waitFor();await page.waitForFunction(()=>!document.querySelector('#boot'));
+  return {context,page,downloads:()=>tls.downloads()-initialDownloads,publicRequests:()=>publicRequests};
  }
  for(const options of [
   {ua:'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Version/18.0 Mobile/15E148 Safari/604.1'},
@@ -48,7 +51,7 @@ try{
   const originalUrl=page.url();await page.locator('#reg-username').fill('unsaved_user');
   await page.locator('[data-android-download-close]').click();assert.equal(await page.locator('.android-download-banner').count(),0);assert.equal(await page.locator('#reg-username').inputValue(),'unsaved_user');assert.equal(page.url(),originalUrl);
   await page.evaluate(()=>render());assert.equal(await page.locator('.android-download-banner').count(),0);
-  if(!blockedStorage){await page.reload();await page.locator('#login-form').waitFor();await page.waitForFunction(()=>androidDownloadState.requested);assert.equal(await page.locator('.android-download-banner').count(),0,'dismissal survives reload in the browser session')}
+  if(!blockedStorage){await page.reload();await page.locator('#login-form').waitFor();await page.evaluate(()=>syncAndroidDownload());assert.equal(await page.locator('.android-download-banner').count(),0,'dismissal survives reload in the browser session')}
   await state.context.close();
  }
  const store=await open({downloadUrl:storeUrl});await store.page.locator('.android-download-link').waitFor();assert.equal(await store.page.locator('.android-download-link').getAttribute('href'),storeUrl);assert.equal(await store.page.locator('.android-download-link').getAttribute('download'),null);await store.context.close();
@@ -64,15 +67,15 @@ try{
   await page.locator('[data-action=apply]').waitFor();assert(page.url().endsWith('#/ride/'+ride.id),'one shared link must open the requested ride after login');
   assert((await page.locator('.detail-page').textContent()).includes('Москва'));assert((await page.locator('.detail-page').textContent()).includes('Тверь'));
   const before=page.url();assert.equal(state.downloads(),0);
-  const downloadPromise=page.waitForEvent('download');await page.locator('.android-download-link').click();const download=await downloadPromise;assert.equal(download.suggestedFilename(),'po-puti.apk');assert.equal(state.downloads(),1);assert.equal(page.url(),before,'downloading must preserve the trip page');
+  const downloadPromise=page.waitForEvent('download');await page.locator('.android-download-link').click();const download=await downloadPromise;assert.equal(download.suggestedFilename(),'po-puti.apk');assert.equal(await download.failure(),null);assert.deepEqual(await readFile(await download.path()),downloadFixture);assert.equal(state.downloads(),1);assert.equal(page.url(),before,'downloading must preserve the trip page');
   assert.equal(await page.locator('.android-download-banner').evaluate(node=>getComputedStyle(node).position),'static');
   await page.locator('[data-action=apply]').scrollIntoViewIfNeeded();const button=await page.locator('[data-action=apply]').boundingBox(),banner=await page.locator('.android-download-banner').boundingBox();assert(banner.y+banner.height<=button.y||banner.y>=button.y+button.height,'banner must not overlap the booking button');
   await page.locator('[data-action=apply]').click();await page.locator('[data-action=apply-confirm]').waitFor();await page.locator('[data-action=apply-confirm]').click();await page.waitForFunction(()=>db.requests.some(request=>request.rideId===location.hash.split('/')[2]&&request.status==='pending'));
   // An expired session must also preserve a direct ride target through login.
   await page.evaluate(()=>api('/logout','POST',{}));await page.reload();await page.locator('#login-form').waitFor();assert.equal(await page.evaluate(()=>pendingPushPath),'/ride/'+ride.id);
-  await page.evaluate(()=>{localStorage.removeItem('po-puti-cookie-session-v1');localStorage.setItem('po-puti-access-v2','expired-legacy-token')});await page.goto(app.base+'/ride/'+ride.id);await page.locator('#login-form').waitFor();assert.equal(await page.evaluate(()=>pendingPushPath),'/ride/'+ride.id,'legacy token migration failure must preserve the shared ride too');
+  await page.evaluate(()=>{localStorage.removeItem('po-puti-cookie-session-v1');localStorage.setItem('po-puti-access-v2','expired-legacy-token')});await page.goto(browserOrigin+'/ride/'+ride.id);await page.locator('#login-form').waitFor();assert.equal(await page.evaluate(()=>pendingPushPath),'/ride/'+ride.id,'legacy token migration failure must preserve the shared ride too');
   await state.context.close();
  }
  assert.deepEqual(errors,[]);
  console.log('PASS: Android browser-only dismissible banner, installed PWA/native/iOS/desktop hidden, missing/unsafe URL hidden, optional storage, RuStore URL replacement, click-only download, shared trip login and unblocked application');
-}finally{await browser?.close();await app.stop();await road.stop()}
+}finally{await browser?.close();await app.stop();await tls.stop();await road.stop()}
