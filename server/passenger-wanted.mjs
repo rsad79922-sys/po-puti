@@ -37,7 +37,7 @@ export function passengerWanted(db,l,{clock=Date.now}={}){
   if(path==='/api/wanted'&&method==='GET'){
    const mine=p.get('mine')==='1',offset=Number(p.get('offset')||0);if(!Number.isInteger(offset)||offset<0||offset>10000)throw fail('Неверная страница');
    const from=text(p.get('from')||'',100),to=text(p.get('to')||'',100),date=text(p.get('date')||'',10);
-   const items=all(`SELECT w.* FROM passenger_wanted w JOIN users u ON u.id=w.user_id WHERE u.blocked_at IS NULL AND ${mine?'w.user_id=?':"w.status='active' AND ? IS NOT NULL"} AND (?='' OR casefold(w.origin)=casefold(?)) AND (?='' OR casefold(w.destination)=casefold(?)) AND (?='' OR w.date=?) ORDER BY w.created_at DESC,w.id LIMIT 51 OFFSET ?`,actor.id,from,from,to,to,date,date,offset);
+   const items=all(`SELECT w.* FROM passenger_wanted w JOIN users u ON u.id=w.user_id WHERE u.blocked_at IS NULL AND ${mine?'w.user_id=?':"w.status='active' AND ? IS NOT NULL"} AND (?='' OR casefold(w.origin)=casefold(?)) AND (?='' OR casefold(w.destination)=casefold(?)) AND (?='' OR w.date=?) ORDER BY CASE WHEN w.status='active' THEN 0 ELSE 1 END,w.created_at DESC,w.id LIMIT 51 OFFSET ?`,actor.id,from,from,to,to,date,date,offset);
    return {items:items.slice(0,50).map(r=>dto(r,actor)),nextOffset:items.length>50?offset+50:null};
   }
   if(path==='/api/wanted'&&method==='POST')return l.tx(()=>{

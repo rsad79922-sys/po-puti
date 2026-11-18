@@ -33,6 +33,8 @@ try{
  assert.equal((await call('/wanted/'+id+'/offer','POST',{rideId},b.token)).status,200);
  assert.equal((await call('/wanted/'+id+'/offer','POST',{rideId},b.token)).data.repeated,true);
  assert.equal(db.prepare('SELECT COUNT(*) n FROM passenger_wanted_offers').get().n,1);
+ for(let n=0;n<51;n++)db.prepare("INSERT INTO passenger_wanted SELECT ?,user_id,origin,destination,date,time,time_zone,expires_at,passengers,comment,'cancelled',created_at+1000,updated_at FROM passenger_wanted WHERE id=?").run(randomUUID(),id);
+ assert.equal((await call('/wanted?mine=1','GET',undefined,a.token)).data.items[0].id,id,'active requests remain manageable after more than 50 historical records');
  assert.equal((await call('/wanted/'+id+'/cancel','POST',{},a.token)).status,200);
  assert.equal((await call('/wanted','GET',undefined,b.token)).data.items.length,0);
  db.prepare("UPDATE passenger_wanted SET status='active',expires_at=0 WHERE id=?").run(id);
