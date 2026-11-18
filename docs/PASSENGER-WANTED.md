@@ -68,3 +68,19 @@ passenger-wanted.mjs (API, сохранность данных, миграция
 отмена/завершение) и browser-wanted.mjs (мобильные PWA/Android bridge, форма,
 ошибки, фильтры, админ-переключатель). Android CI проверяет сборку debug/release,
 совпадение ресурсов, разрешения и native bridge на Android 15 и AOSP 11.
+
+## Изменённые файлы
+
+* server/passenger-wanted.mjs — миграция, модель, настройки, права, лимиты, предложения;
+* server/server.mjs — подключение API/фонового завершения и маршрутов экрана;
+* native/android/PoPutiFeaturesPlugin.java — три фильтра, выделение, кнопки заявок;
+* www/app.js — маршруты и админ-переключатель;
+* www/features-v5.js — смешанные результаты и общий контроллер пассажирских заявок;
+* www/styles.css — горизонтальные фильтры на узком экране;
+* www/index.html, www/sw.js — версия кеша нового клиента;
+* tests/passenger-wanted.mjs — изолированные API/миграционные проверки;
+* tests/browser-wanted.mjs — новые мобильные сценарии обеих платформ;
+* tests/browser-unified-v5.mjs — восстановленные три фильтра и интеграция расписаний;
+* tests/native-android/SharedUiSmokeTest.java — фильтры и кнопки в реальном APK;
+* tests/pwa-bootstrap.mjs — новая версия оболочки;
+* docs/PASSENGER-WANTED.md — аудит, реализация, ограничения и инструкция проверки.

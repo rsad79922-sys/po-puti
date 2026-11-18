@@ -5,19 +5,20 @@ import {randomUUID} from 'node:crypto';
 import {fail} from './lifecycle.mjs';
 import {localToUTC} from './timezones.mjs';
 export async function migrateWanted(db,dir){
- if(db.prepare("SELECT 1 FROM sqlite_master WHERE name='passenger_wanted_schema'").get())return;
+ if(db.prepare("SELECT 1 FROM sqlite_master WHERE name='passenger_wanted_schema'").get()){if(db.prepare('SELECT MAX(version) v FROM passenger_wanted_schema').get().v!==1)throw Error('Unsupported passenger wanted schema');return;}
  const folder=join(dir,'migration-backups');await mkdir(folder,{recursive:true,mode:0o700});const file=join(folder,'before-passenger-wanted-'+randomUUID()+'.sqlite');await backup(db,file);await chmod(file,0o600);
  const copy=new DatabaseSync(file,{readOnly:true});try{if(copy.prepare('PRAGMA integrity_check').get().integrity_check!=='ok')throw Error('Wanted migration backup invalid')}finally{copy.close()}
- db.exec(`BEGIN IMMEDIATE;
+ try{db.exec(`BEGIN IMMEDIATE;
  CREATE TABLE passenger_wanted_schema(version INTEGER PRIMARY KEY);
  CREATE TABLE passenger_wanted_settings(id INTEGER PRIMARY KEY CHECK(id=1),enabled INTEGER NOT NULL CHECK(enabled IN (0,1)));
  INSERT INTO passenger_wanted_settings VALUES(1,1);
  CREATE TABLE passenger_wanted(id TEXT PRIMARY KEY,user_id TEXT NOT NULL REFERENCES users(id),origin TEXT NOT NULL,destination TEXT NOT NULL,date TEXT NOT NULL,time TEXT NOT NULL,time_zone TEXT NOT NULL,expires_at INTEGER NOT NULL,passengers INTEGER NOT NULL CHECK(passengers BETWEEN 1 AND 7),comment TEXT NOT NULL,status TEXT NOT NULL CHECK(status IN ('active','cancelled','completed')),created_at INTEGER NOT NULL,updated_at INTEGER NOT NULL);
  CREATE INDEX wanted_search ON passenger_wanted(status,date,origin,destination);
+ CREATE INDEX wanted_due ON passenger_wanted(status,expires_at);
  CREATE INDEX wanted_owner ON passenger_wanted(user_id,created_at);
  CREATE TABLE passenger_wanted_offers(id TEXT PRIMARY KEY,wanted_id TEXT NOT NULL REFERENCES passenger_wanted(id),ride_id TEXT NOT NULL REFERENCES rides(id),driver_id TEXT NOT NULL REFERENCES users(id),created_at INTEGER NOT NULL,UNIQUE(wanted_id,ride_id));
  CREATE TRIGGER wanted_erase AFTER UPDATE OF username ON users WHEN NEW.username LIKE '!deleted:%' BEGIN UPDATE passenger_wanted SET origin='',destination='',comment='',status='cancelled' WHERE user_id=NEW.id; DELETE FROM passenger_wanted_offers WHERE driver_id=NEW.id; END;
- INSERT INTO passenger_wanted_schema VALUES(1);COMMIT;`);
+ INSERT INTO passenger_wanted_schema VALUES(1);COMMIT;`);}catch(error){db.exec('ROLLBACK');throw error}
 }
 export function passengerWanted(db,l,{clock=Date.now}={}){
  const get=(s,...a)=>db.prepare(s).get(...a),all=(s,...a)=>db.prepare(s).all(...a),run=(s,...a)=>db.prepare(s).run(...a);
@@ -25,7 +26,7 @@ export function passengerWanted(db,l,{clock=Date.now}={}){
  const tick=()=>run("UPDATE passenger_wanted SET status='completed',updated_at=? WHERE status='active' AND expires_at<=?",clock(),clock());
  const text=(v,max)=>{if(typeof v!=='string'||v.trim().length>max)throw fail('Проверьте длину текста');return v.trim()};
  const noContact=v=>{v=v.normalize('NFKC').replace(/\p{Cf}/gu,'');if(/@|https?:|www\.|t\.me|vk\.com|mailto:|(?:\+?\d[\s().-]*){7,}|(?:телефон|телеграм|telegram|whatsapp|ватсап|почта|звоните)/iu.test(v))throw fail('Не указывайте контакты в публичном тексте');return v};
- const dto=(r,actor)=>({id:r.id,from:r.origin,to:r.destination,date:r.date,time:r.time,timeZone:r.time_zone,passengers:r.passengers,comment:r.comment,status:r.status,mine:r.user_id===actor.id,offers:all(`SELECT o.id,o.ride_id rideId FROM passenger_wanted_offers o JOIN rides r ON r.id=o.ride_id JOIN users u ON u.id=r.driver_id WHERE o.wanted_id=? AND r.cancelled=0 AND r.moderation_blocked=0 AND u.blocked_at IS NULL AND r.departure_at>?`,r.id,clock())});
+ const dto=(r,actor)=>({id:r.id,from:r.origin,to:r.destination,date:r.date,time:r.time,timeZone:r.time_zone,passengers:r.passengers,comment:r.comment,status:r.status,mine:r.user_id===actor.id,offers:all(`SELECT o.id,o.ride_id rideId FROM passenger_wanted_offers o JOIN rides r ON r.id=o.ride_id JOIN users u ON u.id=r.driver_id WHERE o.wanted_id=? AND r.cancelled=0 AND r.moderation_blocked=0 AND u.blocked_at IS NULL AND r.departure_at>? ORDER BY o.created_at DESC,o.id LIMIT 50`,r.id,clock())});
  function handle(actor,path,method,data,p){
   tick();
   if(path==='/api/admin/wanted'&&method==='POST'){
@@ -61,6 +62,7 @@ export function passengerWanted(db,l,{clock=Date.now}={}){
    const occupied=get("SELECT COUNT(*) n FROM requests WHERE ride_id=? AND status='accepted'",r.id).n;
    if(r.cancelled||r.moderation_blocked||r.departure_at<=clock()||r.date!==w.date||r.origin.toLocaleLowerCase('ru')!==w.origin.toLocaleLowerCase('ru')||r.destination.toLocaleLowerCase('ru')!==w.destination.toLocaleLowerCase('ru')||r.seats-occupied<w.passengers)throw fail('Поездка не соответствует заявке',409);
    if(!get('SELECT 1 FROM passenger_wanted_offers WHERE wanted_id=? AND ride_id=?',w.id,r.id)&&get('SELECT COUNT(*) n FROM passenger_wanted_offers WHERE driver_id=? AND created_at>?',actor.id,clock()-86400000).n>=30)throw fail('Лимит предложений на сегодня',429);
+   if(!get('SELECT 1 FROM passenger_wanted_offers WHERE wanted_id=? AND ride_id=?',w.id,r.id)&&get('SELECT COUNT(*) n FROM passenger_wanted_offers WHERE wanted_id=?',w.id).n>=50)throw fail('Лимит предложений для этой заявки',429);
    const id=randomUUID(),result=run('INSERT OR IGNORE INTO passenger_wanted_offers VALUES(?,?,?,?,?)',id,w.id,r.id,actor.id,clock());
    if(result.changes)l.event(w.user_id,'wanted_offer','wanted-offer:'+w.id+':'+r.id,'Предложена поездка','Посмотрите предложение водителя.','/ride/'+r.id,r.id);
    return {ok:true,repeated:!result.changes};
