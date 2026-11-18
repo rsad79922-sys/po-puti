@@ -22,6 +22,7 @@ import {adminMfa} from './admin-mfa.mjs';
 import {accountPrivacy} from './account-privacy.mjs';
 import {migrateRouting} from './migrations-v4.mjs';
 import {routing} from './routing.mjs';
+import {migrateWanted,passengerWanted} from './passenger-wanted.mjs';
 import {adminApi} from './admin-api.mjs';
 import {createPush,pushApi,processPush} from './push.mjs';
 
@@ -59,17 +60,19 @@ CREATE INDEX IF NOT EXISTS ix_messages_ride ON messages(ride_id);
 await migrateLifecycle(database,DATA);
 await migrateRouting(database,DATA);
 await migrateFeatures(database,DATA);
+await migrateWanted(database,DATA);
 const privacy=await accountPrivacy(database,DATA);
 const roadRouter=routing(database);
 const pushTransport=createPush();
 const life=lifecycle(database,{pushAvailable:pushTransport.available});
 const handleAdmin=adminApi(life);
+const wanted=passengerWanted(database,life);
 const busCache=prepareTimetableCache(new DatabaseSync(':memory:'));
 const series=rideSeries(life,roadRouter),buses=timetables(database,{cacheDb:busCache}),mfa=adminMfa(database);
 let stopping=false,pushInFlight=null;
 function background(){
  if(stopping)return;
- try{buses.purgeExpired();privacy.purgeMedia();life.tick()}catch{console.error('[lifecycle-worker] failed; see protected worker state')}
+ try{wanted.tick();buses.purgeExpired();privacy.purgeMedia();life.tick()}catch{console.error('[lifecycle-worker] failed; see protected worker state')}
  if(pushInFlight)return;
  pushInFlight=processPush(life,pushTransport,{shouldStop:()=>stopping}).catch(()=>{life.run("UPDATE background_state SET last_error='Worker failed' WHERE name='push'");console.error('[push-worker] failed')}).finally(()=>{pushInFlight=null});
 }
@@ -274,6 +277,8 @@ async function handleApi(req,res,path,data){const method=req.method;
  if(path==='/api/admin/v5/deletion-requests'&&method==='GET')return {items:rows('SELECT d.user_id userId,d.requested_at requestedAt,d.status,u.username FROM deletion_requests d JOIN users u ON u.id=d.user_id ORDER BY d.requested_at LIMIT 100')};
  if(path==='/api/admin/v4/routing'&&method==='GET')return {...roadRouter.capabilities(),diagnostics:roadRouter.diagnostics(),missingEta:q('SELECT COUNT(*) n FROM rides WHERE estimated_arrival_at IS NULL').n};
  if(method==='POST'&&['/api/rides','/api/series','/api/requests','/api/messages','/api/profile','/api/reports','/api/complaints'].includes(path))checkRate('write:'+path+':'+actor.id);
+ if(path==='/api/wanted-config'&&method==='GET')return {enabled:wanted.enabled()};
+ if(path.startsWith('/api/wanted')||path==='/api/admin/wanted'){if(method==='POST')checkRate('wanted:'+actor.id);return wanted.handle(actor,path,method,data,params)}
  if(path==='/api/client-config'&&method==='GET'){const config=clientConfig();if(actor.role==='admin')config.ads.enabled=false;return {...config,timetables:buses.status()};}
  if(path==='/api/admin/mfa/enroll'&&method==='POST'){requireAdmin(actor);checkRate('mfa:'+actor.id);if(!passwordValid(data.password)||!crypto.timingSafeEqual(Buffer.from(actor.hash,'hex'),Buffer.from(await boundedHash(data.password,actor.salt),'hex')))throw jsonError('Неверный пароль',401);const enrollment=mfa.enroll(actor);life.audit(actor,'user',actor.id,'mfa_enroll',{enabled:false},{pending:true},'Администратор подтвердил пароль для настройки MFA');return enrollment}
  if(path==='/api/admin/mfa/verify'&&method==='POST'){requireAdmin(actor);checkRate('mfa:'+actor.id);mfa.verify(actor.id,data.code,true);run('INSERT OR REPLACE INTO session_mfa VALUES(?,?)',sha(requestToken(req)),now());life.audit(actor,'user',actor.id,'mfa_verified',{}, {verified:true},'Администратор подтвердил MFA');return {ok:true}}
@@ -391,7 +396,7 @@ async function handleApi(req,res,path,data){const method=req.method;
  throw jsonError('Маршрут API не найден',404);
 }
 // Direct links to application screens must load the SPA shell, not JSON 404.
-const appScreen = /^\/(?:login|search|publish|trips|notifications|profile|my-reviews|complaints|admin|ride\/[^/]+|reviews\/[^/]+|chat\/[^/]+\/[^/]+)\/?$/;
+const appScreen = /^\/(?:login|search|publish|trips|wanted|wanted-new|notifications|profile|my-reviews|complaints|admin|ride\/[^/]+|reviews\/[^/]+|chat\/[^/]+\/[^/]+)\/?$/;
 async function serveStatic(req,res,pathname){
  let path=pathname==='/'?'/index.html':pathname;
  try{path=decodeURIComponent(path)}catch{throw jsonError('Неверный путь',400)}

@@ -68,9 +68,9 @@ function placeChoices(side){const choices=featureState.choices[side]||[];return 
 function busStatus(){const status=featureState.bus.status;if(status==='idle'||status==='not_requested')return '';const labels={loading:'Ищем автобусные рейсы…',empty:'Автобусные рейсы на выбранную дату не найдены.',not_configured:'Автобусные расписания пока не подключены.',unavailable:'Сервис автобусных расписаний временно недоступен. Частные поездки доступны.',quota_exceeded:'Лимит сервиса расписаний исчерпан. Попробуйте позже.',choose_places:'Уточните населённые пункты или станции ниже.',invalid_query:'Укажите оба пункта и корректную дату поиска.'};return labels[status]?`<p class="note" role="status">${safe(labels[status])}</p>`:''}
 function unifiedResults(){
  const query=db.search||{};const local=db.rides.filter(r=>!r.cancelled&&r.canChangeParticipants!==false&&!r.moderationBlocked&&(!query.from||r.from.toLowerCase()===query.from.toLowerCase())&&(!query.to||r.to.toLowerCase()===query.to.toLowerCase())&&(!query.date||r.date===query.date)&&seatsLeft(r)>0);
- const priv=featureState.private||local;return [...(featureState.filter==='bus'?[]:priv.map(r=>({...r,type:'private_ride'}))),...(featureState.filter!=='bus'||featureState.bus.expiresAt&&Date.now()>=featureState.bus.expiresAt?[]:featureState.bus.items)].sort((a,b)=>String(a.departureAt||a.date+'T'+a.time).localeCompare(String(b.departureAt||b.date+'T'+b.time))||a.id.localeCompare(b.id));
+ const priv=featureState.private||local;return [...(featureState.filter==='bus'?[]:priv.map(r=>({...r,type:'private_ride'}))),...(featureState.filter==='private'||featureState.bus.expiresAt&&Date.now()>=featureState.bus.expiresAt?[]:featureState.bus.items)].sort((a,b)=>String(a.departureAt||a.date+'T'+a.time).localeCompare(String(b.departureAt||b.date+'T'+b.time))||a.id.localeCompare(b.id));
 }
-function unifiedSearchPage(){const items=unifiedResults();const ads=featureState.config?.ads.enabled;return `<main class="page"><div class="page-head"><h1>Куда едем?</h1><p>Попутчики и междугородние автобусы</p></div>${searchPanel()}${adSlot('search')}<div class="segmented" aria-label="Тип поездки">${[['private','Попутчики'],['bus','Автобусы']].map(([v,label])=>`<button data-search-filter="${v}" class="${featureState.filter===v?'active':''}">${label}</button>`).join('')}</div>${featureState.filter==='bus'?busStatus()+placeChoices('from')+placeChoices('to'):''}<div class="trip-list">${items.length?items.map((r,i)=>(r.type==='bus_service'?busCard(r):rideCard(r))+(i===4?adSlot('results'):'')).join(''):empty('Подходящих поездок пока нет','Измените маршрут или дату. Отсутствие автобусного ответа не означает отсутствие рейсов.')}${items.length<5?adSlot('results'):''}</div>${featureState.filter==='bus'?raspCopyright():''}${featureState.privateCursor&&featureState.filter!=='bus'?'<button class="btn btn-ghost" data-more-private>Ещё частные поездки</button>':''}${featureState.filter==='bus'&&featureState.bus.nextOffset!=null?'<button class="btn btn-ghost" data-more-buses>Ещё автобусные рейсы</button>':''}${ads?`<section class="privacy-ads"><p>Реклама Яндекса загружается с вашего согласия.</p><button class="small-link" data-ad-consent="${featureState.consent?'false':'true'}">${featureState.consent?'Отключить рекламу':'Разрешить рекламу'}</button></section>`:''}<button class="btn btn-primary full" data-action="nav" data-route="/publish">Предложить поездку</button><a class="small-link" href="${safe(SERVER_BASE)}/privacy.html" target="_blank" rel="noopener">Конфиденциальность и источники данных</a></main>`}
+function unifiedSearchPage(){const items=unifiedResults();const ads=featureState.config?.ads.enabled;return `<main class="page"><div class="page-head"><h1>Куда едем?</h1><p>Попутчики и междугородние автобусы</p></div>${searchPanel()}${wantedLinks()}${adSlot('search')}<div class="segmented" aria-label="Тип поездки">${[['all','Все'],['private','Попутка'],['bus','Автобусы']].map(([v,label])=>`<button data-search-filter="${v}" class="${featureState.filter===v?'active':''}">${label}</button>`).join('')}</div>${featureState.filter!=='private'?busStatus()+placeChoices('from')+placeChoices('to'):''}<div class="trip-list">${items.length?items.map((r,i)=>(r.type==='bus_service'?busCard(r):rideCard(r))+(i===4?adSlot('results'):'')).join(''):empty('Подходящих поездок пока нет','Измените маршрут или дату. Отсутствие автобусного ответа не означает отсутствие рейсов.')}${items.length<5?adSlot('results'):''}</div>${featureState.filter!=='private'?raspCopyright():''}${featureState.privateCursor&&featureState.filter!=='bus'?'<button class="btn btn-ghost" data-more-private>Ещё частные поездки</button>':''}${featureState.filter!=='private'&&featureState.bus.nextOffset!=null?'<button class="btn btn-ghost" data-more-buses>Ещё автобусные рейсы</button>':''}${ads?`<section class="privacy-ads"><p>Реклама Яндекса загружается с вашего согласия.</p><button class="small-link" data-ad-consent="${featureState.consent?'false':'true'}">${featureState.consent?'Отключить рекламу':'Разрешить рекламу'}</button></section>`:''}<button class="btn btn-primary full" data-action="nav" data-route="/publish">Предложить поездку</button><a class="small-link" href="${safe(SERVER_BASE)}/privacy.html" target="_blank" rel="noopener">Конфиденциальность и источники данных</a></main>`}
 async function runUnifiedSearch(more=false,resolving=false){
  if(!remoteMode||!accessToken)return;const q=db.search||{};if(!q.from||!q.to||!/^\d{4}-\d{2}-\d{2}$/.test(q.date)||!Number.isFinite(Date.parse(q.date))||new Date(q.date).toISOString().slice(0,10)!==q.date){featureState.epoch++;featureState.queryKey=JSON.stringify(q);featureState.private=[];featureState.privateCursor=null;featureState.bus={items:[],status:'invalid_query'};if(location.hash==='#/search')render();return;}
  const epoch=more?featureState.epoch:++featureState.epoch,token=accessToken,key=JSON.stringify(q);featureState.queryKey=key;
@@ -109,9 +109,9 @@ function mountWebAds(){
 }
 async function syncNativeSearch(){
  const bridge=nativeBridge(),session=accessToken;if(!nativeFeatureBound){nativeFeatureBound=true;
-  await bridge.addListener('search',data=>{db.search={from:data.from,to:data.to,date:data.date};featureState.filter=data.filter==='bus'?'bus':'private';featureState.queryKey='';save();runUnifiedSearch()});
+  await bridge.addListener('search',data=>{db.search={from:data.from,to:data.to,date:data.date};featureState.filter=['all','private','bus'].includes(data.filter)?data.filter:'all';featureState.queryKey='';save();runUnifiedSearch()});
   await bridge.addListener('nativeSearchError',()=>{nativeSearchFailed=true;nativeSearchVisible=false;bridge.closeSearch().catch(()=>{})});
-  await bridge.addListener('filter',data=>{featureState.filter=data.filter==='bus'?'bus':'private';render()});
+  await bridge.addListener('filter',data=>{if(typeof data.from==='string')db.search={from:data.from,to:data.to,date:data.date};save();featureState.filter=['all','private','bus'].includes(data.filter)?data.filter:'all';render()});
   await bridge.addListener('place',data=>{if(['from','to'].includes(data.side)){db.search[data.side+'Code']=data.code;save();runUnifiedSearch()}});
   await bridge.addListener('navigate',data=>{nativeSearchVisible=false;if(['trips','notifications','profile'].includes(data.route))navigate('/'+data.route)});
   await bridge.addListener('refreshSearch',()=>{featureState.queryKey='';runUnifiedSearch()});
@@ -119,12 +119,14 @@ async function syncNativeSearch(){
   await bridge.addListener('more',()=>runUnifiedSearch(true));
   await bridge.addListener('adConsent',data=>{featureState.consent=data.granted===true;safeStorage.setItem(consentStorageKey(),String(featureState.consent));api('/privacy/consent','POST',{category:'advertising',granted:featureState.consent}).catch(()=>{});render()});
   await bridge.addListener('openRide',data=>{nativeSearchVisible=false;navigate('/ride/'+encodeURIComponent(data.id))});
+  await bridge.addListener('wanted',()=>{nativeSearchVisible=false;navigate('/wanted-new')});
+  await bridge.addListener('wantedList',()=>{nativeSearchVisible=false;navigate('/wanted')});
   await bridge.addListener('publish',()=>{nativeSearchVisible=false;navigate('/publish')});
   await bridge.addListener('closeSearch',()=>{nativeSearchVisible=false;navigate('/trips')});
  }
  if(!session||session!==accessToken||location.hash!=='#/search')return;
  const items=unifiedResults().map(r=>r.type==='bus_service'?r:{type:'private_ride',id:r.id,from:r.from,to:r.to,date:r.date,time:r.time,price:r.price,available:seatsLeft(r),driver:user(r.driverId).name,car:r.car});
- nativeSearchVisible=true;await bridge.showSearch({query:db.search,filter:featureState.filter,items,choices:featureState.filter==='bus'?featureState.choices:{},hasMore:featureState.filter==='bus'&&featureState.bus.nextOffset!=null,hasMorePrivate:featureState.filter==='private'&&!!featureState.privateCursor,expiresAt:featureState.filter==='bus'?(featureState.bus.expiresAt||0):0,status:featureState.filter==='bus'?busStatus().replace(/<[^>]*>/g,''):'',ads:featureState.config?.ads||{enabled:false},consent:featureState.consent});if(session!==accessToken||location.hash!=='#/search'){nativeSearchVisible=false;await bridge.closeSearch()}
+ nativeSearchVisible=true;await bridge.showSearch({wantedEnabled:wantedState.enabled===true,query:db.search,filter:featureState.filter,items,choices:featureState.filter!=='private'?featureState.choices:{},hasMore:featureState.filter!=='private'&&featureState.bus.nextOffset!=null,hasMorePrivate:featureState.filter!=='bus'&&!!featureState.privateCursor,expiresAt:featureState.filter!=='private'?(featureState.bus.expiresAt||0):0,status:featureState.filter!=='private'?busStatus().replace(/<[^>]*>/g,''):'',ads:featureState.config?.ads||{enabled:false},consent:featureState.consent});if(session!==accessToken||location.hash!=='#/search'){nativeSearchVisible=false;await bridge.closeSearch()}
 }
 function privacyMarkup(){return `<section class="section-card"><h3>Конфиденциальность</h3><a href="${safe(SERVER_BASE)}/privacy.html" target="_blank" rel="noopener">Политика и источники данных</a><p><button class="small-link" data-request-deletion>Удалить аккаунт</button></p>${me()?.role==='admin'?'<button class="small-link" data-mfa-enroll>Настроить MFA администратора</button><p><button class="small-link" data-mfa-stepup>Подтвердить MFA</button></p>':''}</section>`}
 document.addEventListener('change',e=>{
@@ -132,7 +134,7 @@ document.addEventListener('change',e=>{
  if(e.target.dataset.placeChoice&&e.target.value){const side=e.target.dataset.placeChoice;db.search[side+'Code']=e.target.value;save();runUnifiedSearch()}
 });
 document.addEventListener('click',async e=>{
- const filter=e.target.closest('[data-search-filter]');if(filter){featureState.filter=filter.dataset.searchFilter==='bus'?'bus':'private';render()}
+ const filter=e.target.closest('[data-search-filter]');if(filter){featureState.filter=['all','private','bus'].includes(filter.dataset.searchFilter)?filter.dataset.searchFilter:'all';render()}
  if(e.target.closest('[data-more-private]'))loadMorePrivate();
  if(e.target.closest('[data-more-buses]'))runUnifiedSearch(true);
  const consent=e.target.closest('[data-ad-consent]');if(consent){featureState.consent=consent.dataset.adConsent==='true';safeStorage.setItem(consentStorageKey(),String(featureState.consent));api('/privacy/consent','POST',{category:'advertising',granted:featureState.consent}).catch(()=>{}).finally(()=>{if(!featureState.consent&&!window.Capacitor)location.reload()});render()}
@@ -166,3 +168,48 @@ async function loadMorePrivate(){
  catch{if(epoch===featureState.epoch&&token===accessToken)toast('Не удалось загрузить следующую страницу. Повторите попытку.')}
  finally{featureState.privateLoading=false}
 }
+
+// Shared passenger request screens: Android opens this same WebView controller.
+const wantedState={enabled:null,token:null,checked:0,loading:false,items:null,mine:null,error:'',key:'',offset:null};
+async function wantedConfig(force=false){
+ if(!remoteMode||!accessToken||wantedState.loading||(!force&&wantedState.token===accessToken&&Date.now()-wantedState.checked<15000))return;
+ wantedState.loading=true;const token=accessToken;
+ try{const c=await api('/wanted-config');if(token!==accessToken)return;if(wantedState.token!==token){wantedState.items=null;wantedState.mine=null}const changed=wantedState.token!==token||wantedState.enabled!==c.enabled;wantedState.token=token;wantedState.enabled=c.enabled;wantedState.checked=Date.now();if(changed)render()}
+ catch{if(token===accessToken){wantedState.enabled=false;wantedState.checked=Date.now()}}
+ finally{wantedState.loading=false}
+}
+function wantedLinks(){Promise.resolve().then(()=>wantedConfig());return wantedState.token===accessToken&&wantedState.enabled?'<div class="actions"><button class="btn btn-primary" data-wanted-nav="wanted-new">Ищу попутку</button><button class="btn btn-ghost" data-wanted-nav="wanted">Заявки пассажиров</button></div>':''}
+function wantedAdminMarkup(){Promise.resolve().then(()=>wantedConfig());return `<section class="section-card"><h3>Ищу попутку</h3><button class="btn btn-ghost" data-wanted-toggle ${wantedState.enabled===null?'disabled':''}>${wantedState.enabled?'Выключить':'Включить'}</button></section>`}
+async function loadWanted(more=false){
+ if(!more&&wantedState.error)return;
+ const token=accessToken,q=db.search||{},key=JSON.stringify([token,q]);if(wantedState.fetching)return;if(!more&&wantedState.key===key&&wantedState.items!==null)return;
+ wantedState.fetching=true;wantedState.error='';
+ try{const args=new URLSearchParams({from:q.from||'',to:q.to||'',date:q.date||''});if(more)args.set('offset',wantedState.offset);const [list,mine]=await Promise.all([api('/wanted?'+args),api('/wanted?mine=1')]);if(token!==accessToken)return;wantedState.items=more?[...wantedState.items,...list.items]:list.items;wantedState.mine=mine.items;wantedState.offset=list.nextOffset;wantedState.key=key;}
+ catch(e){if(token===accessToken)wantedState.error=e.message}
+ finally{wantedState.fetching=false;if(token===accessToken&&location.hash==='#/wanted')render()}
+}
+function wantedPage(route){
+ Promise.resolve().then(()=>wantedConfig());
+ if(!accessToken)return '<main class="page">Войдите в аккаунт</main>';
+ if(wantedState.token!==accessToken||wantedState.enabled!==true)return '<main class="page"><h1>Ищу попутку</h1><p>Функция недоступна или ещё загружается.</p><button data-wanted-retry class="btn">Повторить</button></main>';
+ if(route==='wanted-new'){const q=db.search||{};return `<main class="page"><h1>Ищу попутку</h1><form id="wanted-form" class="stack"><label class="field">Откуда<input name="from" required maxlength="100" value="${safe(q.from||'')}"></label><label class="field">Куда<input name="to" required maxlength="100" value="${safe(q.to||'')}"></label><label class="field">Дата<input name="date" type="date" required value="${safe(q.date||today(1))}"></label><label class="field">Желаемое время<input name="time" type="time" required></label><label class="field">Часовой пояс отправления<input name="timeZone" required value="${safe(Intl.DateTimeFormat().resolvedOptions().timeZone)}"></label><label class="field">Количество пассажиров<input name="passengers" type="number" min="1" max="7" value="1" required></label><label class="field">Комментарий<textarea name="comment" maxlength="500"></textarea></label><p>Контакты не публикуются. Общение доступно через обычное бронирование предложенной поездки.</p><button type="submit" class="btn btn-primary">Опубликовать заявку</button><p data-wanted-error role="alert"></p></form></main>`}
+ Promise.resolve().then(()=>loadWanted());
+ const card=w=>`<section class="section-card"><h3>${safe(w.from)} → ${safe(w.to)}</h3><p>${safe(w.date)} · ${safe(w.time)} (${safe(w.timeZone)}) · ${w.passengers} пасс.</p><p>${safe(w.comment)}</p><p>${safe(({active:'Активна',cancelled:'Отменена',completed:'Завершена'})[w.status])}</p>${w.mine&&w.status==='active'?`<button class="btn" data-wanted-cancel="${safe(w.id)}">Отменить</button><button class="btn" data-wanted-edit="${safe(w.id)}">Изменить комментарий</button>`:!w.mine&&w.status==='active'?`<button class="btn" data-wanted-offer="${safe(w.id)}">Предложить свою поездку</button>`:''}${w.offers.map(o=>`<p><button class="small-link" data-action="open-ride" data-id="${safe(o.rideId)}">Посмотреть предложенную поездку</button></p>`).join('')}</section>`;
+ return `<main class="page"><h1>Заявки пассажиров</h1>${wantedLinks()}<p>Подбор по маршруту и дате главного поиска.</p>${wantedState.error?`<p role="alert">${safe(wantedState.error)}</p><button data-wanted-retry>Повторить</button>`:''}<h2>Мои заявки</h2>${(wantedState.mine||[]).map(card).join('')||'<p>Нет заявок</p>'}<h2>Подходящие заявки</h2>${(wantedState.items||[]).map(card).join('')||'<p>Подходящих заявок нет</p>'}${wantedState.offset!==null?'<button data-wanted-more>Ещё заявки</button>':''}</main>`;
+}
+document.addEventListener('submit',async e=>{if(e.target.id!=='wanted-form')return;e.preventDefault();const form=e.target,b=form.querySelector('button[type=submit]');b.disabled=true;try{await api('/wanted','POST',Object.fromEntries(new FormData(form)));wantedState.key='';wantedState.items=null;navigate('/wanted')}catch(err){form.querySelector('[data-wanted-error]').textContent=err.message}finally{b.disabled=false}});
+document.addEventListener('click',async e=>{
+ const el=e.target.closest('[data-wanted-nav],[data-wanted-toggle],[data-wanted-retry],[data-wanted-more],[data-wanted-cancel],[data-wanted-edit],[data-wanted-offer],[data-wanted-send]');if(!el)return;
+ try{
+  if(el.hasAttribute('data-wanted-nav'))return navigate('/'+el.dataset.wantedNav);
+  if(el.hasAttribute('data-wanted-toggle')){await api('/admin/wanted','POST',{enabled:!wantedState.enabled});await wantedConfig(true);return}
+  if(el.hasAttribute('data-wanted-retry')){wantedState.key='';wantedState.error='';await wantedConfig(true);return loadWanted()}
+  if(el.hasAttribute('data-wanted-more'))return loadWanted(true);
+  if(el.dataset.wantedCancel)await api('/wanted/'+encodeURIComponent(el.dataset.wantedCancel)+'/cancel','POST',{});
+  if(el.dataset.wantedEdit){const w=wantedState.mine.find(w=>w.id===el.dataset.wantedEdit);const comment=prompt('Комментарий без контактов',w.comment);if(comment===null)return;await api('/wanted/'+encodeURIComponent(w.id)+'/update','POST',{comment})}
+  if(el.dataset.wantedOffer){const w=wantedState.items.find(w=>w.id===el.dataset.wantedOffer),rides=db.rides.filter(r=>r.driverId===db.currentUserId&&!r.cancelled&&r.date===w.date&&r.from.toLocaleLowerCase('ru')===w.from.toLocaleLowerCase('ru')&&r.to.toLocaleLowerCase('ru')===w.to.toLocaleLowerCase('ru')&&seatsLeft(r)>=w.passengers);return showModal('Предложить поездку',rides.length?rides.map(r=>`<p><button class="btn" data-wanted-send="${safe(w.id)}" data-ride="${safe(r.id)}">${safe(r.from)} → ${safe(r.to)} · ${safe(r.time)}</button></p>`).join(''):'<p>Нет подходящих поездок. Опубликуйте поездку с этим маршрутом и датой.</p>','')}
+  if(el.dataset.wantedSend){await api('/wanted/'+encodeURIComponent(el.dataset.wantedSend)+'/offer','POST',{rideId:el.dataset.ride});hideModal();toast('Предложение отправлено')}
+  wantedState.key='';await loadWanted();
+ }catch(err){toast(err.message)}
+});
+setInterval(()=>{if(document.visibilityState==='visible'&&accessToken){wantedConfig();if(location.hash==='#/wanted'){wantedState.key='';loadWanted()}}},15000);
