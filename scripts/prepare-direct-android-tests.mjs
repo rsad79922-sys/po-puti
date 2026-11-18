@@ -15,6 +15,7 @@ gradle.projectsEvaluated {
 `;
 await writeFile(path,gradle);
 const tests='android/app/src/androidTest/java/ru/poputi/app';await mkdir(tests,{recursive:true});
+await copyFile('tests/native-android/LauncherIconAssertions.java',tests+'/LauncherIconAssertions.java');
 await copyFile('tests/native-android/SignedReleaseFlowTest.java',tests+'/SignedReleaseFlowTest.java');
 await mkdir('android/app/src/test/java/ru/poputi/app',{recursive:true});
 await copyFile('tests/native-android/PushPolicyTest.java','android/app/src/test/java/ru/poputi/app/PushPolicyTest.java');

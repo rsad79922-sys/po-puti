@@ -38,6 +38,7 @@ public class SharedUiSmokeTest {
     }
     private static void awaitNotificationCount(android.app.NotificationManager manager,int expected)throws Exception{long until=System.currentTimeMillis()+5000;while(manager.getActiveNotifications().length!=expected&&System.currentTimeMillis()<until)Thread.sleep(50);assertEquals(expected,manager.getActiveNotifications().length);}
     @Test public void launchesPackagedUiAndNativeBridge() throws Exception {
+        LauncherIconAssertions.assertOwnerBrand(androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().getTargetContext());
         try (ActivityScenario<MainActivity> scenario = ActivityScenario.launch(MainActivity.class)) {
             long until = System.currentTimeMillis() + 45000;
             String value = "";

@@ -76,6 +76,7 @@ public class SignedReleaseFlowTest {
     @Test public void signedReleaseInstallsLaunchesLogsInAndSearchesProduction() throws Exception {
         android.content.Context context=InstrumentationRegistry.getInstrumentation().getTargetContext();
         assertEquals("ru.poputi.app",context.getPackageName());
+        LauncherIconAssertions.assertOwnerBrand(context);
         assertEquals("Release must not be debuggable",0,context.getApplicationInfo().flags&ApplicationInfo.FLAG_DEBUGGABLE);
         int expected=Integer.parseInt(InstrumentationRegistry.getArguments().getString("expectedVersionCode","4"));
         assertEquals(expected,context.getPackageManager().getPackageInfo(context.getPackageName(),0).versionCode);
