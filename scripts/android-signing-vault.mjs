@@ -69,7 +69,9 @@ async function sign(vault,jar,input,output,expectedCertificate){
  await privateFile(input);await privateFile(jar);
  const temp=output+'.next';if(await info(temp)||await info(output))throw Error('Signing output already exists; files were preserved');
  try{
-  run('java',['-jar',jar,'sign','--ks',join(vault,files.key),'--ks-type','PKCS12','--ks-key-alias',SIGNING_ALIAS,'--ks-pass','file:'+join(vault,files.password),'--key-pass','file:'+join(vault,files.password),'--v4-signing-enabled','false','--out',temp,input],'APK signing failed; the private key remains on the VPS');
+  // PKCS12 uses the store password for its private key. apksigner consumes a
+  // separate line for each read, so do not read the same one-line file twice.
+  run('java',['-jar',jar,'sign','--ks',join(vault,files.key),'--ks-type','PKCS12','--ks-key-alias',SIGNING_ALIAS,'--ks-pass','file:'+join(vault,files.password),'--v4-signing-enabled','false','--out',temp,input],'APK signing failed; the private key remains on the VPS');
   await chmod(temp,0o600);
   const verification=run('java',['-jar',jar,'verify','--verbose','--print-certs',temp],'APK signature verification failed').toString('utf8');
   const signers=[...verification.matchAll(/^Signer #\d+ certificate SHA-256 digest: ([a-fA-F0-9:]+)\s*$/gm)].map(m=>m[1].replaceAll(':','').toLowerCase());
