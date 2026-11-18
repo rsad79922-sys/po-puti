@@ -1,7 +1,7 @@
 /* Network-first shell. Bump CACHE_NAME whenever the shell release changes.
    API traffic is never intercepted; the new worker activates immediately. */
 const CACHE_PREFIX = 'po-puti-shell-';
-const CACHE_NAME = CACHE_PREFIX + 'two-search-tabs-v8';
+const CACHE_NAME = CACHE_PREFIX + 'android-download-v9';
 const NETWORK_TIMEOUT_MS = 15000;
 const SHELL = new Map([
   ['/index.html', ['text/html']],
@@ -117,6 +117,7 @@ self.addEventListener('fetch', event => {
   const url = new URL(request.url);
   if (request.method !== 'GET' || url.origin !== self.location.origin ||
       url.pathname === '/config.js' ||
+      url.pathname.startsWith('/downloads/') ||
       url.pathname === '/api' || url.pathname.startsWith('/api/')) return;
 
   const navigation = request.mode === 'navigate';

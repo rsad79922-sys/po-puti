@@ -17,6 +17,7 @@ import {migrateFeatures} from './migrations-v5.mjs';
 import {rideSeries} from './ride-series.mjs';
 import {safeTicketUrl,prepareTimetableCache,timetables} from './timetables.mjs';
 import {clientConfig} from './client-config.mjs';
+import {serveAndroidApk} from './android-download.mjs';
 import {adminMfa} from './admin-mfa.mjs';
 import {accountPrivacy} from './account-privacy.mjs';
 import {migrateRouting} from './migrations-v4.mjs';
@@ -249,7 +250,7 @@ function state(actor){
 function cancelRide(ride,actor,asAdmin=false,reason=''){life.mutable(ride);if(asAdmin&&(!reason||typeof reason!=='string'))throw jsonError('Укажите причину отмены');if(ride.driver_id!==actor.id&&!asAdmin)throw jsonError('Недостаточно прав',403);if(ride.cancelled)throw jsonError('Поездка уже отменена',409);transaction(()=>{if(asAdmin)life.audit(actor,'ride',ride.id,'cancel',{cancelled:false},{cancelled:true},reason);run('UPDATE rides SET cancelled=1 WHERE id=?',ride.id);if(ride.series_id)run('INSERT OR IGNORE INTO ride_series_exceptions VALUES(?,?,?)',ride.series_id,ride.date,'Водитель отменил эту дату');for(const r of rows("SELECT * FROM requests WHERE ride_id=? AND status IN ('pending','accepted')",ride.id)){run("UPDATE requests SET status='cancelled' WHERE id=?",r.id);notify(r.user_id,'Поездка отменена',`${ride.origin} → ${ride.destination}: поездка отменена`,ride.id,'ride_cancelled')}});return {ok:true};}
 async function handleApi(req,res,path,data){const method=req.method;
  if(path==='/api/health' && method==='GET')return {ok:q('SELECT 1 AS ok').ok===1,backend:'sqlite',version:'0.2',release:process.env.RELEASE_SHA||'development'};
- if(path==='/api/public-config'&&method==='GET')return {privacy:clientConfig().privacy};
+ if(path==='/api/public-config'&&method==='GET'){const config=clientConfig();return {privacy:config.privacy,androidDownloadUrl:config.androidDownloadUrl};}
  if(path==='/api/register' && method==='POST'){
    checkRate(clientIp(req));if(data.clientVersion===5&&data.termsAccepted!==true)throw jsonError('Подтвердите согласие с условиями обработки данных');const uname=clean(data.username,33).toLowerCase();if(!usernameValid(uname)||!passwordValid(data.password))throw jsonError('Логин должен содержать 3–32 символа, пароль — не менее 8');
    if(q('SELECT id FROM users WHERE username=?',uname))throw jsonError('Этот логин уже занят',409);
@@ -393,6 +394,10 @@ const appScreen = /^\/(?:login|search|publish|trips|notifications|profile|my-rev
 async function serveStatic(req,res,pathname){
  let path=pathname==='/'?'/index.html':pathname;
  try{path=decodeURIComponent(path)}catch{throw jsonError('Неверный путь',400)}
+ if(path==='/downloads/po-puti.apk'){
+  if(!await serveAndroidApk(req,res,join(DATA,'downloads','po-puti.apk')))throw jsonError('APK пока не опубликован',404);
+  return;
+ }
  if(path==='/admin'||path==='/admin/'){const actor=requireActor(req);requireAdmin(actor)}
  if(appScreen.test(path) && String(req.headers.accept||'').includes('text/html')) path='/index.html';
  if(path.startsWith('/uploads/')){

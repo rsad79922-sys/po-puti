@@ -121,8 +121,7 @@ async function refreshRemote({fresh=false}={}){
   }catch(err){
    if(sessionToken!==accessToken)return false;
    if(err.status===401){
-     clearRemoteSession();
-     navigate('/login');
+     expireRemoteSession();
    }
    serverError=err.message;
    const active=document.activeElement;
@@ -139,6 +138,12 @@ function clearRemoteSession(preserveCookieMarker=false){
  accessToken='';featureState.queryKey='';featureState.private=null;featureState.privateCursor=null;featureState.bus={items:[],status:'idle'};featureState.epoch++;featureState.config=null;featureState.series=null;featureState.consent=false;if(typeof nativeBridge==='function'){const bridge=nativeBridge();bridge?.closeSearch().catch(()=>{});bridge?.removeToken().catch(()=>{});if(typeof nativeSearchVisible!=='undefined')nativeSearchVisible=false;}safeStorage.removeItem(TOKEN_STORE);if(!preserveCookieMarker)safeStorage.removeItem(COOKIE_STORE);adminData=null;serverError='';
  db={currentUserId:null,users:[],rides:[],requests:[],notifications:[],reviews:[],messages:[],reports:[],search:db.search,searchSubmitted:db.searchSubmitted,draft:null};
  pubStep=1;save();
+}
+function expireRemoteSession(){
+ const sharedRide=sharedRidePath(location.hash.slice(1))||sharedRidePath(pendingPushPath);
+ clearRemoteSession();
+ pendingPushPath=sharedRide;
+ navigate('/login');
 }
 async function mutateRemote(path,payload,success){
  try{
@@ -250,11 +255,12 @@ function render(){let hash='/search';try{hash=decodeURIComponent(location.hash.r
  else if(route==='admin'){page=adminPage();active='profile'}
  else {page=searchPage();active='search'}
  if(typeof preserveAds==='function')preserveAds();
- $('#app').innerHTML=`<div class="shell">${header()}${!navigator.onLine?'<div class="warning" style="margin:0 20px 12px">Нет интернета.</div>':''}${serverError?`<div class="warning" style="margin:0 20px 12px">${safe(serverError)} <button data-action="retry-sync" class="small-link">Повторить</button></div>`:''}${page}${route==='search'?'<button class="floating-create" data-action="nav" data-route="/publish">'+fmtIcon('plus')+' Поездка</button>':''}${navBar(active)}</div>`;
+ $('#app').innerHTML=`<div class="shell">${header()}<div data-android-download-host></div>${!navigator.onLine?'<div class="warning" style="margin:0 20px 12px">Нет интернета.</div>':''}${serverError?`<div class="warning" style="margin:0 20px 12px">${safe(serverError)} <button data-action="retry-sync" class="small-link">Повторить</button></div>`:''}${page}${route==='search'?'<button class="floating-create" data-action="nav" data-route="/publish">'+fmtIcon('plus')+' Поездка</button>':''}${navBar(active)}</div>`;
  if(keepSearch&&$('#search-form')){$('#search-form').replaceWith(searchForm);if(selection){selection.node.focus({preventScroll:true});if(selection.start!==null)try{selection.node.setSelectionRange(selection.start,selection.end)}catch{}}}
  if(route==='publish'&&db.draft?.editingRideId){for(const id of ['pub-seats','pub-price','pub-car','pub-negotiable','pub-luggage','pub-comment','pub-photo']){const el=$('#'+id);if(el)el.disabled=true;}}
  if(typeof restoreAds==='function')restoreAds();
  syncUnreadBadge();
+  if(typeof syncAndroidDownload==='function')syncAndroidDownload();
  if(typeof syncFeatures==='function')Promise.resolve().then(syncFeatures);
  document.title='По пути · '+({search:'Поиск',publish:'Создать поездку',trips:'Мои поездки',notifications:'Уведомления',profile:'Профиль',ride:'Поездка',login:'Вход',reviews:'Отзывы',chat:'Чат',admin:'Администрирование'}[route]||'Поездки');
 }
@@ -426,7 +432,9 @@ document.addEventListener('input',e=>{if(!e.target.closest('#publish-form'))retu
 // Shared PWA/Capacitor UI. Every eligibility/status/deadline below comes from API.
 const OUTCOME_LABELS={pending_confirmation:'Ожидает подтверждения',completed:'Состоялась',not_held:'Не состоялась',disputed:'Спорная',unverified:'Не подтверждена',cancelled:'Отменена'};
 let v3Admin={section:'summary',page:1,q:'',status:'',from:'',to:'',data:null,key:'',loading:false,error:''};
-let pendingPushPath=/^#\/(?:chat\/|ride\/|reviews\/|notifications|complaints|admin)/.test(location.hash||'')?(location.hash||'').slice(1):null;
+function sharedRidePath(value){return typeof value==='string'&&/^\/ride\/[a-zA-Z0-9_-]+\/?$/.test(value)?value.replace(/\/$/,''):null}
+// Preserve one shared ride URL through login, including a direct /ride/id link.
+let pendingPushPath=sharedRidePath(location.hash.slice(1)||location.pathname)||(/^#\/(?:chat\/|reviews\/|notifications|complaints|admin)/.test(location.hash||'')?(location.hash||'').slice(1):null);
 let pushConfig=null,pushLoading=false,pushMessage='',nativePush=null,nativePushBound=false;
 function participationFor(id){return (db.participations||[]).find(p=>p.rideId===id)}
 function tripTime(value,offset='+00:00'){const sign=offset[0]==='-'?-1:1;const parts=offset.slice(1).split(':').map(Number);return new Date(Date.parse(value)+sign*(parts[0]*60+parts[1])*60000).toISOString().slice(0,16).replace('T',' ')+' UTC'+offset}
@@ -553,6 +561,6 @@ window.addEventListener('offline',()=>render());
 setInterval(()=>{if(remoteMode&&accessToken&&navigator.onLine&&document.visibilityState==='visible'&&!imageProcessing&&!publishing&&!document.querySelector('.overlay')&&!['INPUT','TEXTAREA','SELECT'].includes(document.activeElement?.tagName))refreshRemote()},45000);
 window.addEventListener('focus',()=>{if(remoteMode&&accessToken&&navigator.onLine&&!imageProcessing&&!publishing&&!['INPUT','TEXTAREA','SELECT'].includes(document.activeElement?.tagName)&&Date.now()-lastStateSuccessAt>15000)refreshRemote()});
 window.addEventListener('storage',event=>{if(cookieSession&&event.key===COOKIE_STORE){if(event.newValue===accessToken)return;clearRemoteSession(true);if(event.newValue){accessToken=event.newValue;safeStorage.setItem(COOKIE_STORE,accessToken);refreshRemote()}else navigate('/login');return;}if(!remoteMode&&event.key===STORE){try{db=JSON.parse(event.newValue)||seed();render()}catch{}}});
-if(!location.hash){const path=location.pathname||'';location.hash=/^\/(?:login|search|publish|trips|notifications|profile|my-reviews|complaints|admin|ride\/[^/]+|reviews\/[^/]+|chat\/[^/]+\/[^/]+)\/?$/.test(path)?path.replace(/\/$/,''):'/search';}if(remoteMode){let localUI={};try{localUI=JSON.parse(safeStorage.getItem('po-puti-ui-v2')||'{}')}catch{localUI={}};if(!localUI||typeof localUI!=='object'||Array.isArray(localUI))localUI={};if(localUI.search&&(!['from','to','date'].every(key=>typeof localUI.search[key]==='string')))localUI.search=null;if(localUI.draft&&(typeof localUI.draft!=='object'||Array.isArray(localUI.draft)||['from','to','date','time','car'].some(key=>typeof localUI.draft[key]!=='string')))localUI.draft=null;db={currentUserId:null,users:[],rides:[],requests:[],notifications:[],reviews:[],messages:[],reports:[],search:localUI.search||{from:'Москва',to:'Санкт-Петербург',date:today(1)},searchSubmitted:true,draft:localUI.draft||null};if(accessToken){render();if(cookieSession&&!isCookieToken(accessToken)){const legacyToken=accessToken;api('/session','POST',{}).then(()=>{if(accessToken!==legacyToken)return;accessToken='cookie:'+ids();safeStorage.removeItem(TOKEN_STORE);safeStorage.setItem(COOKIE_STORE,accessToken);return refreshRemote()}).catch(err=>{if(accessToken!==legacyToken)return;if(err.status===401)clearRemoteSession();serverError=err.message;render()})}else refreshRemote()}else{navigate('/login');render()}}else{save();render()};
+if(!location.hash){const path=location.pathname||'';location.hash=/^\/(?:login|search|publish|trips|notifications|profile|my-reviews|complaints|admin|ride\/[^/]+|reviews\/[^/]+|chat\/[^/]+\/[^/]+)\/?$/.test(path)?path.replace(/\/$/,''):'/search';}if(remoteMode){let localUI={};try{localUI=JSON.parse(safeStorage.getItem('po-puti-ui-v2')||'{}')}catch{localUI={}};if(!localUI||typeof localUI!=='object'||Array.isArray(localUI))localUI={};if(localUI.search&&(!['from','to','date'].every(key=>typeof localUI.search[key]==='string')))localUI.search=null;if(localUI.draft&&(typeof localUI.draft!=='object'||Array.isArray(localUI.draft)||['from','to','date','time','car'].some(key=>typeof localUI.draft[key]!=='string')))localUI.draft=null;db={currentUserId:null,users:[],rides:[],requests:[],notifications:[],reviews:[],messages:[],reports:[],search:localUI.search||{from:'Москва',to:'Санкт-Петербург',date:today(1)},searchSubmitted:true,draft:localUI.draft||null};if(accessToken){render();if(cookieSession&&!isCookieToken(accessToken)){const legacyToken=accessToken;api('/session','POST',{}).then(()=>{if(accessToken!==legacyToken)return;accessToken='cookie:'+ids();safeStorage.removeItem(TOKEN_STORE);safeStorage.setItem(COOKIE_STORE,accessToken);return refreshRemote()}).catch(err=>{if(accessToken!==legacyToken)return;if(err.status===401)expireRemoteSession();serverError=err.message;render()})}else refreshRemote()}else{navigate('/login');render()}}else{save();render()};
 if(typeof nativeBridge==='function'&&nativeBridge())restoreNativeSession();
 // Service Worker update is managed by index.html only; never delay app rendering.
