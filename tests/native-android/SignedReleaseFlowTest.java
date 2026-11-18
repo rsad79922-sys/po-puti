@@ -83,9 +83,10 @@ public class SignedReleaseFlowTest {
         String cleanupToken=null;
         ActivityScenario<MainActivity> scenario=null;
         try{
+            // Establish a healthy Activity before creating a production QA account.
+            scenario=ActivityScenario.launch(MainActivity.class);
             JSONObject registration=request("/register",new JSONObject().put("username",username).put("password",password).put("clientVersion",5).put("termsAccepted",true),null);
             cleanupToken=registration.getString("token");String testUserId=registration.getJSONObject("user").getString("id");
-            scenario=ActivityScenario.launch(MainActivity.class);
             final TestCredentials credentials=new TestCredentials(username,password);
             scenario.onActivity(activity->{WebView web=activity.getBridge().getWebView();web.addJavascriptInterface(credentials,"__PoPutiReleaseTestCredentials");web.reload();});
             await(scenario,"!!document.getElementById('reg-username')&&typeof window.__PoPutiReleaseTestCredentials==='object'","Signed release login screen must load");
