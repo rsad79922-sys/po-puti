@@ -40,6 +40,11 @@ jobs:
           node-version: '24'
           cache: npm
       - run: npm ci --ignore-scripts
+      - name: Use the official Ubuntu archive when the runner has the slow EC2 mirror
+        run: |
+          if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then
+            sudo sed -E -i 's|https?://[a-z0-9-]+\.ec2\.archive\.ubuntu\.com/ubuntu/?|https://archive.ubuntu.com/ubuntu|g' /etc/apt/sources.list.d/ubuntu.sources
+          fi
       - run: npx playwright install --with-deps ${{ matrix.engine }}
       - name: Real browser flows, cookie security, photo upload and PWA offline recovery
         env:
