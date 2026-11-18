@@ -19,5 +19,13 @@ const r=spawnSync('java',['-jar',stage+'/apksigner.jar','sign','--ks',vault+'/po
 const message=String(r.stderr||'')+'\n'+String(r.stdout||'');
 const rules={java_version:/UnsupportedClassVersionError|class file version/,unknown_option:/Unknown option|Unsupported option|Invalid option|Unrecognized option/,keystore_load:/Failed to load signer|Keystore was tampered|password was incorrect|Cannot recover key|UnrecoverableKeyException/,pkcs12_algorithm:/parseAlgParameters|AlgorithmParameters|ObjectIdentifier|HmacPBESHA|Unsupported tag/,missing_class:/NoClassDefFoundError|ClassNotFoundException/,permission:/Permission denied|AccessDeniedException/,bad_jar:/Invalid or corrupt jarfile|Unable to access jarfile|Could not find or load main class/};
 console.log('SIGNING_DIAGNOSTIC',JSON.stringify({status:r.status,signal:r.signal,errorCode:r.error?.code,matches:Object.keys(rules).filter(k=>rules[k].test(message)),exceptionClasses:[...new Set(message.match(/(?:java|javax|com\.android|sun|org\.bouncycastle)\.[A-Za-z0-9_.]+(?:Exception|Error)/g)||[])]}));
+console.log('PASSWORD_FILE_READ_DIAGNOSTIC',JSON.stringify({endOfFile:/end of file|EOF|no more password/i.test(message)}));
+const out2=stage+'/diagnostic-single-password.apk';
+try{await lstat(out2);throw Error('Diagnostic output already exists')}catch(e){if(e.code!=='ENOENT')throw e}
+const r2=spawnSync('java',['-jar',stage+'/apksigner.jar','sign','--ks',vault+'/po-puti-release.p12','--ks-type','PKCS12','--ks-key-alias','po-puti-direct-release','--ks-pass','file:'+vault+'/store-password','--v4-signing-enabled','false','--out',out2,stage+'/release-aligned.apk'],{encoding:'utf8',timeout:60000});
+let certificateMatches=false;
+if(r2.status===0){const verified=spawnSync('java',['-jar',stage+'/apksigner.jar','verify','--print-certs',out2],{encoding:'utf8',timeout:30000});const actual=verified.stdout.match(/Signer #1 certificate SHA-256 digest: ([a-f0-9:]+)/i)?.[1].replaceAll(':','').toLowerCase();certificateMatches=verified.status===0&&actual===c.fingerprint256.replaceAll(':','').toLowerCase()}
+console.log('SINGLE_PASSWORD_SIGNING_RESULT',JSON.stringify({status:r2.status,signal:r2.signal,certificateMatches}));
+await rm(out2,{force:true});
 await rm(out,{force:true});
 JS
