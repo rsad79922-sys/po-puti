@@ -63,7 +63,7 @@ public class PoPutiFeaturesPlugin extends Plugin {
   topAd=column();root.addView(topAd);
   LinearLayout filters=new LinearLayout(getContext());filterButtons=filters;String[] values={"all","private","bus"},titles={"Все","Попутка","Автобусы"};
   for(int i=0;i<values.length;i++){final String value=values[i];Button b=button(titles[i],()->{filter=value;emit("filter",new JSObject().put("filter",filter).put("from",from.getText().toString()).put("to",to.getText().toString()).put("date",date.getText().toString()));});filters.addView(b,new LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1));}root.addView(filters);
-  wantedActions=column();wantedActions.addView(button("Ищу попутку",()->{close();emit("wanted",new JSObject());}));wantedActions.addView(button("Заявки пассажиров",()->{close();emit("wantedList",new JSObject());}));
+  wantedActions=column();wantedActions.setTag("po-puti-native-wanted");wantedActions.addView(button("Ищу попутку",()->{close();emit("wanted",new JSObject());}));wantedActions.addView(button("Заявки пассажиров",()->{close();emit("wantedList",new JSObject());}));
   ScrollView scroll=new ScrollView(getContext());results=column();scroll.addView(results);root.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));
   root.addView(button("Предложить поездку",()->{close();emit("publish",new JSObject());}));
   LinearLayout tabs=new LinearLayout(getContext());String[] routes={"trips","notifications","profile"},names={"Поездки","Уведомления","Профиль"};for(int i=0;i<3;i++){final String route=routes[i];tabs.addView(button(names[i],()->{close();emit("navigate",new JSObject().put("route",route));}),new LinearLayout.LayoutParams(0,-2,1));}root.addView(tabs);

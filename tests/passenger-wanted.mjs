@@ -6,7 +6,7 @@ import {isolatedServer} from './helpers/server.mjs';
 import {migrateWanted,passengerWanted} from '../server/passenger-wanted.mjs';
 const app=await isolatedServer();let db;
 const call=async(path,method='GET',body,token)=>{const r=await fetch(app.base+'/api'+path,{method,headers:{'content-type':'application/json',...(token?{Authorization:'Bearer '+token}:{})},body:body?JSON.stringify(body):undefined});return {status:r.status,data:await r.json()}};
-const register=async()=>{const r=await call('/register','POST',{username:'wanted_'+randomUUID().slice(0,8),password:randomUUID()});assert.equal(r.status,200);return r.data};
+const register=async()=>{const password=randomUUID();const r=await call('/register','POST',{username:'wanted_'+randomUUID().slice(0,8),password});assert.equal(r.status,200);return {...r.data,password}};
 try{
  const a=await register(),b=await register();db=new DatabaseSync(app.dir+'/po-puti.sqlite');
  const oldUsers=db.prepare('SELECT COUNT(*) n FROM users').get().n,backups=(await readdir(app.dir+'/migration-backups')).length;
@@ -22,6 +22,8 @@ try{
  assert.equal((await call('/wanted/'+id+'/update','POST',{comment:'Два чемодана'},a.token)).status,200);
  assert.equal((await call('/admin/wanted','POST',{enabled:false},b.token)).status,403);
  db.prepare("UPDATE users SET role='admin' WHERE id=?").run(b.user.id);
+ db.prepare('INSERT INTO admin_mfa VALUES(?,?,1,-1)').run(b.user.id,'fixture-encrypted-placeholder');
+ assert.equal((await call('/admin/wanted','POST',{enabled:false},b.token)).status,403,'MFA step-up required');db.prepare('DELETE FROM admin_mfa WHERE user_id=?').run(b.user.id);
  assert.equal((await call('/admin/wanted','POST',{enabled:false},b.token)).status,200);
  assert.equal((await call('/wanted','POST',body,a.token)).status,403);assert.equal((await call('/wanted','GET',undefined,a.token)).status,403);assert.equal(db.prepare('SELECT COUNT(*) n FROM passenger_wanted').get().n,1);
  assert.equal((await call('/admin/wanted','POST',{enabled:true},b.token)).status,200);
@@ -35,6 +37,7 @@ try{
  assert.equal((await call('/wanted','GET',undefined,b.token)).data.items.length,0);
  db.prepare("UPDATE passenger_wanted SET status='active',expires_at=0 WHERE id=?").run(id);
  await call('/wanted?mine=1','GET',undefined,a.token);assert.equal(db.prepare('SELECT status FROM passenger_wanted WHERE id=?').get(id).status,'completed');
+ assert.equal((await call('/account/delete','POST',{confirmation:'DELETE_MY_ACCOUNT',password:a.password},a.token)).status,200);assert.equal(db.prepare('SELECT comment FROM passenger_wanted WHERE id=?').get(id).comment,'');
  assert.equal(db.prepare('PRAGMA integrity_check').get().integrity_check,'ok');
  assert.equal(db.prepare('SELECT COUNT(*) n FROM users').get().n,oldUsers);
  console.log('PASS: additive idempotent migration, privacy, validation/spam, owner-only edits, admin toggle/MFA route guard, matching owned ride offers/idempotency, cancellation and expiration; existing records preserved');
