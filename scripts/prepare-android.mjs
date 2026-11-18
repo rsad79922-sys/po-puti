@@ -1,3 +1,4 @@
+import {prepareLauncherIcons} from './prepare-launcher-icons.mjs';
 import {readFile,writeFile,copyFile,mkdir} from 'node:fs/promises';
 const folder='android/app/src/main/java/ru/poputi/app';await mkdir(folder,{recursive:true});
 await copyFile('native/android/PoPutiFeaturesPlugin.java',folder+'/PoPutiFeaturesPlugin.java');
@@ -32,3 +33,6 @@ const versionCode=process.env.ANDROID_VERSION_CODE,versionName=process.env.ANDRO
 if(versionCode){if(!/^[1-9]\d{0,8}$/.test(versionCode))throw Error('Invalid Android versionCode');build=build.replace(/versionCode \d+/,`versionCode ${versionCode}`)}
 if(versionName){if(!/^[\d]+(?:\.[\d]+){1,3}$/.test(versionName))throw Error('Invalid Android versionName');build=build.replace(/versionName "[^"]+"/,`versionName "${versionName}"`)}
 await writeFile(gradle,build);console.log('ANDROID_FEATURES_PREPARED: native inline ads, shared search, encrypted sessions; no signing key accessed');
+
+await prepareLauncherIcons('android/app/src/main/res');
+console.log('ANDROID_BRAND_ICONS_PREPARED: owner logo, all densities, adaptive and round launchers, splash');

@@ -39,6 +39,7 @@ jobs:
           if [ -n "$FIREBASE_ANDROID_CONFIG_JSON" ]; then
             printf '%s' "$FIREBASE_ANDROID_CONFIG_JSON" > android/app/google-services.json
           fi
+          install -D -m 0644 tests/native-android/LauncherIconAssertions.java android/app/src/androidTest/java/ru/poputi/app/LauncherIconAssertions.java
           install -D -m 0644 tests/native-android/SharedUiSmokeTest.java android/app/src/androidTest/java/ru/poputi/app/SharedUiSmokeTest.java
           install -D -m 0644 tests/native-android/PushPolicyTest.java android/app/src/test/java/ru/poputi/app/PushPolicyTest.java
           npx cap sync android
