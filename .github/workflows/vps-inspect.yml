@@ -1,4 +1,4 @@
-name: Read-only publication preflight
+name: Private signing runtime diagnostics (no secret output)
 on:
   push:
     branches: [ops/reinstall-publication-20261114]
@@ -19,24 +19,6 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: '24'
-      - name: Check existing GitHub Timetables secret on the runner only
-        env:
-          YANDEX_RASP_API_KEY: ${{ secrets.YANDEX_RASP_API_KEY }}
-        run: |
-          set +x
-          if [ -n "$YANDEX_RASP_API_KEY" ]; then
-            node scripts/probe-timetables.mjs
-          else
-            echo 'RASP_SECRET_NOT_AVAILABLE: no value requested or disclosed.'
-          fi
-      - name: Install runtime dependencies for isolated public-city probe
-        run: npm ci --omit=dev --ignore-scripts
-      - name: Check real Timetables catalog and public-city search without live user data
-        env:
-          YANDEX_RASP_API_KEY: ${{ secrets.YANDEX_RASP_API_KEY }}
-        run: |
-          set +x
-          if [ -n "$YANDEX_RASP_API_KEY" ]; then node scripts/probe-timetables-live.mjs; fi
       - name: Inspect deployment prerequisites without changing the server
         env:
           DEPLOY_HOST: ${{ secrets.POPUTI_DEPLOY_HOST }}

@@ -1,100 +1,23 @@
 #!/usr/bin/env bash
-# Read-only preflight for both existing and freshly reinstalled Ubuntu.
-# Never print credentials, environment contents, database rows or private keys.
+# Isolated signing diagnostics. Never print key/password bytes or signing stderr.
 set -euo pipefail
-export LC_ALL=C
-date -u +%FT%TZ
-printf 'SERVICE_STATES\n'
-systemctl is-active po-puti nginx || true
-printf 'OPERATING_SYSTEM\n'
-sed -nE '/^(PRETTY_NAME|VERSION_ID)=/p' /etc/os-release
-printf 'CAPACITY\n'
-getconf _NPROCESSORS_ONLN
-free -m
-df -m /var/lib/po-puti
-printf 'RUNTIME\n'
-if command -v node >/dev/null; then node --version; else echo NODE_NOT_INSTALLED; fi
-if command -v nginx >/dev/null; then nginx -v 2>&1; else echo NGINX_NOT_INSTALLED; fi
-printf 'APPLICATION_CHECKOUT\n'
-if [[ -d /opt/po-puti/.git ]]; then
- git -C /opt/po-puti rev-parse HEAD
- git -C /opt/po-puti branch --show-current
- git -C /opt/po-puti status --porcelain
-else
- echo APPLICATION_CHECKOUT_MISSING
-fi
-printf 'UNIT_PATHS\n'
-systemctl show po-puti -p FragmentPath -p WorkingDirectory -p EnvironmentFiles -p User -p Group || true
-printf 'LISTENERS\n'
-ss -H -ltn '( sport = :80 or sport = :443 or sport = :8443 or sport = :8080 )'
-printf 'LOCAL_HEALTH\n'
-curl --noproxy '*' -fsS --max-time 5 http://127.0.0.1:8080/api/health || true
-printf '\nTLS_SITE_DIRECTIVES\n'
-if command -v nginx >/dev/null; then
- nginx -T 2>&1 | awk '/^# configuration file / || /^[[:space:]]*(listen|server_name|ssl_protocols)[[:space:]]/{print}' || true
-fi
-printf 'PERSISTENT_DATA_AND_PUBLIC_ENV\n'
-python3 - <<'PY'
-import pathlib,subprocess,json
-result=subprocess.run(['systemctl','show','po-puti','-p','MainPID','--value'],capture_output=True,text=True)
-pid=int(result.stdout.strip() or '0')
-if pid>0:
- env=dict(x.split(b'=',1) for x in pathlib.Path(f'/proc/{pid}/environ').read_bytes().split(b'\0') if b'=' in x)
- for key in ['HOST','PORT','DATA_DIR','PUBLIC_ORIGIN','APP_ORIGINS','NODE_ENV','RELEASE_SHA']:
-  print(key+'='+json.dumps(env.get(key.encode(),b'').decode()))
- print('ADMIN_PASSWORD_PRESENT='+str(bool(env.get(b'ADMIN_PASSWORD'))))
-else:
- print('APPLICATION_NOT_RUNNING')
-for path in ['/var/lib/po-puti/po-puti.sqlite','/var/lib/po-puti/uploads','/opt/po-puti/server-data/po-puti.sqlite','/etc/po-puti/po-puti.env','/var/backups/po-puti']:
- p=pathlib.Path(path)
- print('PERSISTENT_PATH '+path+' exists='+str(p.exists())+' mode='+ (oct(p.stat().st_mode&0o777) if p.exists() else 'missing'))
- if p.is_file() and p.suffix=='.sqlite':print('DATABASE_BYTES='+str(p.stat().st_size))
-p=pathlib.Path('/var/backups/po-puti')
-if p.is_dir():print('BACKUP_ENTRY_COUNT='+str(len(list(p.iterdir()))))
-PY
-printf 'CERTIFICATE\n'
-if [[ -f /etc/letsencrypt/live/vputipoputka.ru/fullchain.pem ]]; then
- openssl x509 -in /etc/letsencrypt/live/vputipoputka.ru/fullchain.pem -noout -dates -subject
-else
- echo CERTIFICATE_MISSING
-fi
-printf 'LOCAL_HTTPS\n'
-for port in 443 8443; do
- curl --noproxy '*' -sS --resolve "vputipoputka.ru:$port:127.0.0.1" --connect-timeout 2 --max-time 5 -o /dev/null -w "port=$port http=%{http_code} verify=%{ssl_verify_result}\n" "https://vputipoputka.ru:$port/api/health" || true
-done
-
-printf 'FREE_MAP_DOWNLOAD_CONNECTIVITY\n'
-for tls in 1.2 1.3; do
- curl -4 --noproxy '*' --tlsv"$tls" --tls-max "$tls" --http1.1 --fail --silent --show-error --connect-timeout 8 --max-time 20 -o /dev/null -w "tls=$tls http=%{http_code} bytes=%{size_download} total=%{time_total}\n" https://brouter.de/brouter/segments4/ || true
-done
-
-printf "GEOCODER_SAFE_DIAGNOSIS\n"
-node --input-type=module <<'GEO_DIAG'
-import {readFileSync} from 'node:fs';import {parseEnv} from 'node:util';
-let env={};try{env=parseEnv(readFileSync('/etc/po-puti/routing.env','utf8'))}catch{}
-console.log('GEOCODER_SETTINGS',JSON.stringify({provider:env.GEOCODING_PROVIDER||null,keyPresent:!!env.GEOCODING_API_KEY,router:env.ROUTING_PROVIDER||null}));
-if(env.GEOCODING_API_KEY){const url=new URL(env.GEOCODING_URL||'https://geocode-maps.yandex.ru/v1');url.searchParams.set('apikey',env.GEOCODING_API_KEY);url.searchParams.set('geocode','Москва, Тверская улица, 1');url.searchParams.set('format','json');url.searchParams.set('lang','ru_RU');url.searchParams.set('results','5');try{const response=await fetch(url,{redirect:'error',signal:AbortSignal.timeout(10000)});let data;try{data=await response.json()}catch{}console.log('GEOCODER_UPSTREAM',JSON.stringify({http:response.status,matches:data?.response?.GeoObjectCollection?.featureMember?.length??null,errorCode:data?.statusCode??null}));}catch(e){console.log('GEOCODER_UPSTREAM',JSON.stringify({error:e.name,networkCode:e.cause?.code||null}))}}
-
-GEO_DIAG
-
-printf 'RELEASE_FEATURE_SETTINGS_PRESENCE\n'
-node --input-type=module <<'FEATURE_DIAG'
-import {readFileSync} from 'node:fs';
-import {parseEnv} from 'node:util';
-let disk={};
-for(const file of ['/etc/po-puti/po-puti.env','/etc/po-puti/routing.env','/etc/po-puti/push.env','/etc/po-puti/features.env','/etc/po-puti/rasp.env','/etc/po-puti/yandex-rasp.env']){
- try{Object.assign(disk,parseEnv(readFileSync(file,'utf8')))}catch{}
-}
-console.log('FEATURE_SETTINGS',JSON.stringify({
- raspKeyPresent:!!disk.YANDEX_RASP_API_KEY,raspTermsConfirmed:disk.RASP_LICENSE_CONFIRMED==='true',raspDailyLimit:Number(disk.RASP_DAILY_LIMIT)||0,raspCacheSeconds:Number(disk.RASP_CACHE_SECONDS)||0,
- adsEnabled:disk.ADS_ENABLED==='true',adsTermsConfirmed:disk.ADS_TERMS_CONFIRMED==='true',webSlotsPresent:['SEARCH','RESULTS'].filter(n=>!!disk['ADS_WEB_'+n+'_ID']).length,androidSlotsPresent:['SEARCH','RESULTS'].filter(n=>!!disk['ADS_ANDROID_'+n+'_ID']).length,
- privacyOperatorPresent:!!disk.PRIVACY_OPERATOR,privacyContactPresent:!!disk.PRIVACY_CONTACT,privacyApproved:disk.PRIVACY_POLICY_APPROVED==='true',
- nativeFcmConfigured:!!disk.FCM_PROJECT_ID&&!!(disk.FCM_SERVICE_ACCOUNT_JSON||disk.GOOGLE_APPLICATION_CREDENTIALS),nativeRuStoreConfigured:!!disk.RUSTORE_PUSH_PROJECT_ID&&!!disk.RUSTORE_PUSH_SERVICE_TOKEN,
- previousVersionCodePresent:/^[1-9]\d*$/.test(disk.ANDROID_PREVIOUS_VERSION_CODE||''),previousCertificatePresent:/^[a-f0-9:]{64,95}$/i.test(disk.ANDROID_PREVIOUS_CERT_SHA256||'')
-}));
-// One authenticated request to a public metadata endpoint; never output the key or returned HTML.
-if(disk.YANDEX_RASP_API_KEY){try{
- const response=await fetch('https://api.rasp.yandex-net.ru/v3.0/copyright/?format=json',{headers:{Authorization:disk.YANDEX_RASP_API_KEY},redirect:'error',signal:AbortSignal.timeout(10000)});
- const data=await response.json().catch(()=>null);console.log('RASP_AUTH_PROBE',JSON.stringify({http:response.status,copyrightPresent:!!data?.copyright}));
-}catch{console.log('RASP_AUTH_PROBE',JSON.stringify({status:'network_unavailable'}))}}
-FEATURE_DIAG
+node --input-type=module <<'JS'
+import {spawnSync} from 'node:child_process';
+import {lstat,readFile,rm} from 'node:fs/promises';
+import {X509Certificate} from 'node:crypto';
+const stage='/var/lib/po-puti-android-builds/run-44284676549-1';
+const vault='/etc/po-puti/android-signing';
+const j=spawnSync('java',['-version'],{encoding:'utf8'});
+console.log('SIGNER_JAVA_VERSION',j.stderr.match(/version "([0-9._+\-]+)"/)?.[1]||'unavailable');
+const v=spawnSync('java',['-jar',stage+'/apksigner.jar','version'],{encoding:'utf8'});
+console.log('PUBLIC_TOOL_VERSION',JSON.stringify({status:v.status,stdout:v.stdout.trim().slice(0,120),stderr:v.stderr.trim().slice(0,500)}));
+for(const name of ['po-puti-release.p12','store-password','certificate.pem']){const s=await lstat(vault+'/'+name);console.log('VAULT_FILE_STATE',JSON.stringify({name,uid:s.uid,mode:(s.mode&0o777).toString(8),regular:s.isFile()}))}
+const c=new X509Certificate(await readFile(vault+'/certificate.pem'));console.log('PUBLIC_SIGNING_CERTIFICATE_SHA256',c.fingerprint256);
+const out=stage+'/diagnostic-candidate.apk';
+try{await lstat(out);throw Error('Diagnostic output already exists')}catch(e){if(e.code!=='ENOENT')throw e}
+const r=spawnSync('java',['-jar',stage+'/apksigner.jar','sign','--ks',vault+'/po-puti-release.p12','--ks-type','PKCS12','--ks-key-alias','po-puti-direct-release','--ks-pass','file:'+vault+'/store-password','--key-pass','file:'+vault+'/store-password','--v4-signing-enabled','false','--out',out,stage+'/release-aligned.apk'],{encoding:'utf8',timeout:60000});
+const message=String(r.stderr||'')+'\n'+String(r.stdout||'');
+const rules={java_version:/UnsupportedClassVersionError|class file version/,unknown_option:/Unknown option|Unsupported option|Invalid option|Unrecognized option/,keystore_load:/Failed to load signer|Keystore was tampered|password was incorrect|Cannot recover key|UnrecoverableKeyException/,pkcs12_algorithm:/parseAlgParameters|AlgorithmParameters|ObjectIdentifier|HmacPBESHA|Unsupported tag/,missing_class:/NoClassDefFoundError|ClassNotFoundException/,permission:/Permission denied|AccessDeniedException/,bad_jar:/Invalid or corrupt jarfile|Unable to access jarfile|Could not find or load main class/};
+console.log('SIGNING_DIAGNOSTIC',JSON.stringify({status:r.status,signal:r.signal,errorCode:r.error?.code,matches:Object.keys(rules).filter(k=>rules[k].test(message)),exceptionClasses:[...new Set(message.match(/(?:java|javax|com\.android|sun|org\.bouncycastle)\.[A-Za-z0-9_.]+(?:Exception|Error)/g)||[])]}));
+await rm(out,{force:true});
+JS
