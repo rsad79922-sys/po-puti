@@ -14,6 +14,13 @@ try{
  const actor={id:'fixture'},data={deviceId:'rustore-device-1234',platform:'android',provider:'rustore',token:'fixture-device-token-abcdefghijklmnopqrstuvwxyz'};
  assert.throws(()=>pushApi(l,actor,'/api/push/subscribe','POST',{...data,provider:'fcm'}),e=>e.status===503,'no silent fallback to FCM');
  const subscription=pushApi(l,actor,'/api/push/subscribe','POST',data);assert.equal(pushApi(l,actor,'/api/push/subscribe','POST',data).id,subscription.id);
+ assert.equal(pushApi(l,actor,'/api/push/subscribe','POST',{...data,refreshOnly:true}).id,subscription.id);
+ assert.throws(()=>pushApi(l,actor,'/api/push/subscribe','POST',{...data,deviceId:'unregistered-device-1234',refreshOnly:true}),e=>e.status===409);
+ db.prepare('UPDATE push_subscriptions SET keys_json=? WHERE id=?').run(JSON.stringify({provider:'fcm'}),subscription.id);
+ assert.throws(()=>pushApi(l,actor,'/api/push/subscribe','POST',{...data,refreshOnly:true}),e=>e.status===409,'stale native callback cannot switch a new provider');
+ db.prepare('UPDATE push_subscriptions SET keys_json=?,active=0 WHERE id=?').run(JSON.stringify({provider:'rustore'}),subscription.id);
+ assert.throws(()=>pushApi(l,actor,'/api/push/subscribe','POST',{...data,refreshOnly:true}),e=>e.status===409,'token rotation cannot resurrect opt-out');
+ db.prepare('UPDATE push_subscriptions SET active=1 WHERE id=?').run(subscription.id);
  l.event(actor.id,'review_published','rustore-fixture','Private review text','Private phone','/notifications');await processPush(l,transport);
  assert.equal(calls.length,1);const request=calls[0];assert.equal(request.url,'https://vkpns.rustore.ru/v1/projects/fixture-project/messages:send');assert.equal(request.options.redirect,'error');assert.equal(request.options.headers.Authorization,'Bearer '+env.RUSTORE_PUSH_SERVICE_TOKEN);
  const message=JSON.parse(request.options.body).message;assert.equal(message.token,data.token);assert.equal(message.android.ttl,'86400s');assert.equal(message.data.path,'/notifications');assert.equal(message.data.recipientId,actor.id);assert.equal(message.notification,undefined,'data-only delivery lets native policy suppress stale notifications after logout');assert.equal(message.android.notification,undefined);assert(!request.options.body.includes('Private'));assert(!JSON.stringify(transport.available()).includes(env.RUSTORE_PUSH_SERVICE_TOKEN));

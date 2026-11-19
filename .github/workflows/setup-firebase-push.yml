@@ -1,0 +1,48 @@
+name: Configure protected Firebase Android push
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: po-puti-production
+  cancel-in-progress: false
+jobs:
+  verify:
+    uses: ./.github/workflows/verify.yml
+  configure:
+    needs: verify
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    environment: production
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - name: Install protected settings on the existing server
+        env:
+          DEPLOY_HOST: ${{ secrets.POPUTI_DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.POPUTI_DEPLOY_USER }}
+          DEPLOY_KEY: ${{ secrets.POPUTI_DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.POPUTI_DEPLOY_KNOWN_HOSTS }}
+          DEPLOY_PORT: ${{ secrets.POPUTI_DEPLOY_PORT }}
+          FIREBASE_ANDROID_CONFIG_JSON: ${{ secrets.FIREBASE_ANDROID_CONFIG_JSON }}
+          FCM_SERVICE_ACCOUNT_JSON: ${{ secrets.FCM_SERVICE_ACCOUNT_JSON }}
+        run: |
+          set -euo pipefail
+          umask 077
+          ssh_dir="$RUNNER_TEMP/firebase-ssh"
+          trap 'rm -rf "$ssh_dir"' EXIT
+          bash deploy/prepare-ssh.sh "$ssh_dir"
+          node --input-type=module - "$ssh_dir/input.json" <<'JS'
+          import {writeFileSync} from 'node:fs';
+          try {
+            const android=JSON.parse(process.env.FIREBASE_ANDROID_CONFIG_JSON||'');
+            const serviceAccount=JSON.parse(process.env.FCM_SERVICE_ACCOUNT_JSON||'');
+            writeFileSync(process.argv[2],JSON.stringify({android,serviceAccount}),{mode:0o600,flag:'wx'});
+          } catch { console.error('Add FIREBASE_ANDROID_CONFIG_JSON and FCM_SERVICE_ACCOUNT_JSON to protected GitHub Secrets. Values are never printed.');process.exit(1); }
+          JS
+          ssh -i "$ssh_dir/key" -p "${DEPLOY_PORT:-22}" -o BatchMode=yes -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$ssh_dir/known_hosts" -o ConnectTimeout=12 \
+            "$DEPLOY_USER@$DEPLOY_HOST" 'set -eu; umask 077; file=$(mktemp /tmp/po-puti-firebase-input-XXXXXXXX); cleanup(){ rm -f "$file"; }; trap cleanup EXIT; cat > "$file"; if [ "$(id -u)" -eq 0 ]; then bash /opt/po-puti/deploy/configure-firebase-push.sh "$file"; else sudo -n bash /opt/po-puti/deploy/configure-firebase-push.sh "$file"; fi' < "$ssh_dir/input.json"

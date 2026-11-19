@@ -457,33 +457,38 @@ function pushDeviceId(){let id=safeStorage.getItem('po-puti-device-v3');if(!id){
 function nativePlatform(){return window.Capacitor?.getPlatform?.()==='android'}
 function getNativePush(){if(!nativePush&&nativePlatform())nativePush=window.Capacitor.registerPlugin?.('PushNotifications')||window.Capacitor.Plugins?.PushNotifications;return nativePush}
 function getRuStorePush(){if(!nativePlatform()||!window.Capacitor?.isPluginAvailable?.('PoPutiRuStorePush'))return null;return window.Capacitor.registerPlugin?.('PoPutiRuStorePush')||window.Capacitor.Plugins?.PoPutiRuStorePush;}
+function getFcmPush(){if(!nativePlatform()||!window.Capacitor?.isPluginAvailable?.('PoPutiFcmPush'))return null;return window.Capacitor.registerPlugin?.('PoPutiFcmPush')||window.Capacitor.Plugins?.PoPutiFcmPush;}
 let rustorePushBound=false,pendingRuStoreRecipient=null;
 function consumePendingPushPath(){const path=pendingRuStoreRecipient&&pendingRuStoreRecipient!==db.currentUserId?null:pendingPushPath;pendingPushPath=null;pendingRuStoreRecipient=null;return path;}
 async function bindRuStorePush(){const plugin=getRuStorePush();if(!plugin||rustorePushBound)return;await plugin.addListener('notificationAction',event=>{if(db.currentUserId&&event.recipientId!==db.currentUserId)return;pendingPushPath=safePushPath(event.path);pendingRuStoreRecipient=event.recipientId;if(accessToken&&db.currentUserId)navigate(consumePendingPushPath())});rustorePushBound=true;}
 function syncUnreadBadge(){const count=db.unreadCount??unread();if(navigator.setAppBadge){Promise.resolve(count?navigator.setAppBadge(count):navigator.clearAppBadge?.()).catch(()=>{})}if(!count&&nativePlatform()){getNativePush()?.removeAllDeliveredNotifications?.().catch(()=>{});getRuStorePush()?.clearDelivered?.().catch(()=>{})}}
-function pushWidget(){const permission=typeof Notification!=='undefined'?Notification.permission:'default';return `<h3>Уведомления</h3><p class="subtle">${safe(pushMessage||'Фоновые уведомления можно включить для этого устройства.')}</p>${!nativePlatform()?'<p class="tiny muted">На iPhone Web Push доступен в установленной на экран «Домой» PWA при поддержке iOS. Точка на значке Android зависит от системы и лаунчера.</p>':''}<button class="btn btn-primary" data-v3-action="push-enable" ${!pushConfig?'disabled':''}>${permission==='denied'?'Разрешите уведомления в настройках устройства':'Включить уведомления'}</button><button class="btn btn-ghost" data-v3-action="push-disable">Отключить на этом устройстве</button>`}
+function pushWidget(){const permission=typeof Notification!=='undefined'?Notification.permission:'default';return `<h3>Уведомления</h3><p class="subtle">${safe(pushMessage||(nativePlatform()&&pushConfig&&!pushConfig.android&&!pushConfig.rustore?'Фоновые уведомления Android пока не подключены. Новые события доступны в разделе «Уведомления».':'Фоновые уведомления можно включить для этого устройства.'))}</p>${!nativePlatform()?'<p class="tiny muted">На iPhone Web Push доступен в установленной на экран «Домой» PWA при поддержке iOS. Точка на значке Android зависит от системы и лаунчера.</p>':''}<button class="btn btn-primary" data-v3-action="push-enable" ${!pushConfig||nativePlatform()&&!pushConfig.android&&!pushConfig.rustore?'disabled':''}>${permission==='denied'?'Разрешите уведомления в настройках устройства':'Включить уведомления'}</button><button class="btn btn-ghost" data-v3-action="push-disable">Отключить на этом устройстве</button>`}
 function refreshPushWidget(){const el=$('#push-controls');if(el)el.innerHTML=pushWidget()}
 async function loadPushConfig(){if(pushLoading||pushConfig||!accessToken)return;pushLoading=true;const token=accessToken;try{const result=await api('/push/config');if(token===accessToken)pushConfig=result}catch{if(token===accessToken)pushMessage='Настройки уведомлений сейчас недоступны.'}finally{pushLoading=false;if(token===accessToken)refreshPushWidget()}}
 function pushPanel(){if(!remoteMode)return '';const pending=(db.participations||[]).reduce((n,p)=>n+(p.reviewTargets||[]).filter(t=>t.state==='pending_by_user').length,0);Promise.resolve().then(loadPushConfig);return `<section class="section-card" id="push-controls">${pushWidget()}</section><section class="section-card actions">${pending?`<p class="note">Неотправленных отзывов: ${pending}. Форму можно открыть в «Мои отзывы».</p>`:''}<button class="btn btn-ghost" data-action="nav" data-route="/my-reviews">Мои отзывы</button><button class="btn btn-ghost" data-action="nav" data-route="/complaints">Мои обращения</button></section>`}
 function safePushPath(value){return typeof value==='string'&&/^\/(?:chat\/[a-zA-Z0-9_-]+\/[a-zA-Z0-9_-]+|ride\/[a-zA-Z0-9_-]+|reviews\/[a-zA-Z0-9_-]+|notifications|complaints|admin)$/.test(value)?value:'/notifications'}
-async function bindNativePush(){if(nativePushBound||!nativePlatform())return;const plugin=getNativePush();if(!plugin)return;await plugin.addListener('pushNotificationActionPerformed',e=>{pendingPushPath=safePushPath(e.notification?.data?.path);if(accessToken)navigate(pendingPushPath)});await plugin.addListener('pushNotificationReceived',()=>{if(accessToken)refreshRemote({fresh:true})});nativePushBound=true;}
+async function bindNativePush(){if(nativePushBound||!nativePlatform())return;const plugin=getNativePush();if(!plugin)return;await plugin.addListener('pushNotificationActionPerformed',e=>{if(!db.currentUserId||e.notification?.data?.recipientId!==db.currentUserId)return;pendingPushPath=safePushPath(e.notification.data.path);if(accessToken)navigate(pendingPushPath)});await plugin.addListener('pushNotificationReceived',()=>{if(accessToken)refreshRemote({fresh:true})});nativePushBound=true;}
 async function enablePush(){
  const token=accessToken;if(!token)return;const config=pushConfig;if(!config)throw Error('Настройки ещё загружаются');
  if(nativePlatform()){
   const rustore=getRuStorePush(),rustoreStatus=rustore?await rustore.status():null;if(config.rustore&&rustoreStatus?.configured){
    if(config.rustoreProjectId&&rustoreStatus.projectId&&config.rustoreProjectId!==rustoreStatus.projectId)throw Error('Настройки уведомлений этой сборки не совпадают с сервером.');
-   await bindRuStorePush();const registration=await rustore.register();if(token!==accessToken){await rustore.disable();return;}
-   await api('/push/subscribe','POST',{deviceId:pushDeviceId(),platform:'android',provider:'rustore',token:registration.token});
-   if(token!==accessToken){await rustore.disable();return;}
-   await rustore.activate({userId:db.currentUserId,deviceId:pushDeviceId(),sessionToken:token});pushMessage='Уведомления RuStore включены для этого устройства.';refreshPushWidget();return;
+   try{
+    await bindRuStorePush();const registration=await rustore.register();if(token!==accessToken){await rustore.disable();return;}
+    await api('/push/subscribe','POST',{deviceId:pushDeviceId(),platform:'android',provider:'rustore',token:registration.token});
+    if(token!==accessToken){await rustore.disable();return;}
+    await rustore.activate({userId:db.currentUserId,deviceId:pushDeviceId(),sessionToken:token});pushMessage='Уведомления RuStore включены для этого устройства.';refreshPushWidget();return;
+   }catch(error){if(error.code!=='PROVIDER_UNAVAILABLE'||!config.android)throw error;}
   }
-  if(!config.android)throw Error('Фоновые уведомления Android ещё не настроены на сервере или в этой сборке');
-  const plugin=getNativePush();if(!plugin)throw Error('Пересоберите Android-приложение с push-плагином');
-  await plugin.createChannel?.({id:'trip_updates',name:'Поездки и отзывы',importance:4,visibility:0});
-  const permission=await plugin.requestPermissions();if(permission.receive!=='granted')throw Error('Уведомления не разрешены. Центр уведомлений продолжит работать.');
-  await bindNativePush();
-  const registration=await new Promise(async(resolve,reject)=>{let success,error;const timer=setTimeout(()=>{success?.remove();error?.remove();reject(Error('FCM не ответил. Проверьте Firebase-конфигурацию APK.'))},15000);try{success=await plugin.addListener('registration',v=>{clearTimeout(timer);success?.remove();error?.remove();resolve(v.value)});error=await plugin.addListener('registrationError',()=>{clearTimeout(timer);success?.remove();error?.remove();reject(Error('Не удалось зарегистрировать устройство FCM'))});await plugin.register()}catch(e){clearTimeout(timer);reject(e)}});
-  if(token!==accessToken)return;await api('/push/subscribe','POST',{deviceId:pushDeviceId(),platform:'android',token:registration});
+  if(!config.android)throw Error('Фоновые уведомления Android ещё не настроены на сервере. Центр уведомлений доступен внутри приложения.');
+  const plugin=getFcmPush();if(!plugin)throw Error('Установите новую версию Android-приложения для фоновых уведомлений.');
+  await bindRuStorePush();
+  const registration=await plugin.register({config:config.androidClientConfig});
+  if(token!==accessToken){await plugin.disable();return;}
+  await api('/push/subscribe','POST',{deviceId:pushDeviceId(),platform:'android',provider:'fcm',token:registration.token});
+  if(token!==accessToken){await plugin.disable();return;}
+  await plugin.activate({userId:db.currentUserId,deviceId:pushDeviceId(),sessionToken:token});
+
  }else{
   if(!config.web)throw Error('Web Push ещё не настроен на сервере (VAPID)');
   if(!('Notification' in window)||!('PushManager' in window)||!('serviceWorker' in navigator))throw Error('Браузер не поддерживает push. На iPhone установите PWA на экран «Домой».');
@@ -496,7 +501,7 @@ async function enablePush(){
  }
  pushMessage='Уведомления включены для этого устройства.';refreshPushWidget();
 }
-async function unsubscribeLocalPush(){try{if(nativePlatform()){await getRuStorePush()?.disable();if(pushConfig?.android)await getNativePush()?.unregister?.();}else if(navigator.serviceWorker){const reg=await navigator.serviceWorker.getRegistration();const sub=await reg?.pushManager.getSubscription();await sub?.unsubscribe()}}catch{}}
+async function unsubscribeLocalPush(){try{if(nativePlatform()){await getFcmPush()?.disable();await getRuStorePush()?.disable();if(pushConfig?.android)await getNativePush()?.unregister?.();}else if(navigator.serviceWorker){const reg=await navigator.serviceWorker.getRegistration();const sub=await reg?.pushManager.getSubscription();await sub?.unsubscribe()}}catch{}}
 async function disablePush(){await api('/push/unsubscribe','POST',{deviceId:pushDeviceId()});await unsubscribeLocalPush();pushMessage='Уведомления отключены на этом устройстве.';refreshPushWidget()}
 const ADMIN_SECTIONS={summary:'Сводка',users:'Пользователи',rides:'Поездки',bookings:'Брони',reviews:'Отзывы',complaints:'Жалобы',notifications:'Уведомления',deliveries:'Доставка push',templates:'Шаблоны',audit:'Аудит',system:'Система'};
 function adminKey(){return JSON.stringify([accessToken,v3Admin.section,v3Admin.page,v3Admin.q,v3Admin.status,v3Admin.from,v3Admin.to])}

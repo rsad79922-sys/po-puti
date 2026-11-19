@@ -42,6 +42,7 @@ jobs:
           install -D -m 0644 tests/native-android/LauncherIconAssertions.java android/app/src/androidTest/java/ru/poputi/app/LauncherIconAssertions.java
           install -D -m 0644 tests/native-android/SharedUiSmokeTest.java android/app/src/androidTest/java/ru/poputi/app/SharedUiSmokeTest.java
           install -D -m 0644 tests/native-android/PushPolicyTest.java android/app/src/test/java/ru/poputi/app/PushPolicyTest.java
+          install -D -m 0644 tests/native-android/SearchDateTest.java android/app/src/test/java/ru/poputi/app/SearchDateTest.java
           npx cap sync android
           test -e android/app/src/main/assets/public/config.js
           grep -Fq "https://vputipoputka.ru" android/app/src/main/assets/public/config.js
@@ -68,7 +69,7 @@ jobs:
           arch: x86_64
           profile: pixel_6
           disable-animations: true
-          script: cd android && ./gradlew :app:connectedDebugAndroidTest --no-daemon -Pandroid.testInstrumentationRunnerArguments.class=ru.poputi.app.SharedUiSmokeTest
+          script: bash tests/native-android/run-ui-checks.sh android15
       - name: Save emulator test reports
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -89,13 +90,21 @@ jobs:
           disable-animations: true
           script: |
             python3 -c 'import subprocess; packages=subprocess.check_output(["adb","shell","pm","list","packages","com.google.android.gms"]).decode(); assert "package:" not in packages, "Expected an AOSP device without GMS"'
-            cd android && ./gradlew :app:connectedDebugAndroidTest --no-daemon -Pandroid.testInstrumentationRunnerArguments.class=ru.poputi.app.SharedUiSmokeTest
+            bash tests/native-android/run-ui-checks.sh android11
       - name: Save AOSP startup and bridge test reports (not live push evidence)
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: po-puti-android-aosp-test-reports
           path: android/app/build/reports/androidTests/connected/
+          if-no-files-found: ignore
+          retention-days: 7
+      - name: Save small-screen Android search screenshots
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: po-puti-android-search-screenshots
+          path: out/search-ui/
           if-no-files-found: ignore
           retention-days: 7
       - name: Save Android test artifact (not a signed release)
