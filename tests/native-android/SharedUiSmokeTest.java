@@ -23,20 +23,24 @@ public class SharedUiSmokeTest {
                 assertTrue(ready.await(5,TimeUnit.SECONDS));Thread.sleep(100);
             }
             assertEquals("isolated-notification-session",PoPutiRuStoreState.session(context));
-            PoPutiRuStoreState.activate(context,"fixture-account","fixture-device-1234","isolated-notification-session");
+            PoPutiRuStoreState.activate(context,"fixture-account","fixture-device-1234","isolated-notification-session","fcm");
+            FixtureFcmService service=new FixtureFcmService();service.attach(context);
             java.util.Map<String,String> data=new java.util.HashMap<>();data.put("notificationId","fixture-note");data.put("recipientId","fixture-account");data.put("path","https://attacker.invalid/");
             scenario.moveToState(androidx.lifecycle.Lifecycle.State.CREATED); // UI is stopped: service must display without the WebView.
-            PoPutiRuStoreState.display(context,data);PoPutiRuStoreState.display(context,data);
+            service.onMessageReceived(fcmMessage(data));service.onMessageReceived(fcmMessage(data));
             android.app.NotificationManager manager=(android.app.NotificationManager)context.getSystemService(android.content.Context.NOTIFICATION_SERVICE);
             awaitNotificationCount(manager,1);
             android.app.Notification notice=manager.getActiveNotifications()[0].getNotification();
             assertEquals("Откройте приложение, чтобы посмотреть уведомление.",notice.extras.getString(android.app.Notification.EXTRA_TEXT));
             assertEquals(R.drawable.ic_poputi_notification,notice.getSmallIcon().getResId());
-            data.put("notificationId","wrong-recipient");data.put("recipientId","another-account");PoPutiRuStoreState.display(context,data);assertEquals(1,manager.getActiveNotifications().length);
+            data.put("notificationId","wrong-recipient");data.put("recipientId","another-account");service.onMessageReceived(fcmMessage(data));assertEquals(1,manager.getActiveNotifications().length);
+            PoPutiRuStoreState.activate(context,"fixture-account","fixture-device-1234","isolated-notification-session","rustore");data.put("notificationId","inactive-fcm-provider");data.put("recipientId","fixture-account");service.onMessageReceived(fcmMessage(data));assertEquals("Inactive provider must not display",1,manager.getActiveNotifications().length);
             PoPutiRuStoreState.disable(context,false);awaitNotificationCount(manager,0);
-            data.put("recipientId","fixture-account");PoPutiRuStoreState.display(context,data);assertEquals(0,manager.getActiveNotifications().length);
+            data.put("recipientId","fixture-account");service.onMessageReceived(fcmMessage(data));assertEquals(0,manager.getActiveNotifications().length);
         }finally{PoPutiRuStoreState.disable(context,false);context.getSharedPreferences(PoPutiRuStoreState.SESSION,android.content.Context.MODE_PRIVATE).edit().clear().commit();}
     }
+    private static final class FixtureFcmService extends PoPutiFcmMessagingService {void attach(android.content.Context context){attachBaseContext(context);}}
+    private static com.google.firebase.messaging.RemoteMessage fcmMessage(java.util.Map<String,String> data){return new com.google.firebase.messaging.RemoteMessage.Builder("isolated-fixture").setData(data).build();}
     private static void awaitNotificationCount(android.app.NotificationManager manager,int expected)throws Exception{long until=System.currentTimeMillis()+5000;while(manager.getActiveNotifications().length!=expected&&System.currentTimeMillis()<until)Thread.sleep(50);assertEquals(expected,manager.getActiveNotifications().length);}
     @Test public void launchesPackagedUiAndNativeBridge() throws Exception {
         LauncherIconAssertions.assertOwnerBrand(androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().getTargetContext());
