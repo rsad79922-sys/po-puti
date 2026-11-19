@@ -11,6 +11,7 @@ node deploy/prepare-firebase-settings.mjs "$1" "$candidate"
 backup=$(mktemp -d /var/backups/po-puti-firebase-XXXXXXXX)
 target=/etc/po-puti/firebase-push
 dropin=/etc/systemd/system/po-puti.service.d/46-firebase-push.conf
+[[ ! -L "$target" && ! -L "$dropin" ]] || { echo "Unsafe existing Firebase settings path" >&2;exit 2; }
 [[ ! -d "$target" ]] || cp -a "$target" "$backup/before"
 [[ ! -f "$dropin" ]] || cp -a "$dropin" "$backup/dropin.before"
 rollback(){
