@@ -117,7 +117,7 @@ public class SharedUiSmokeTest {
                 assertFalse(texts.contains("Позвонить"));
                 assertTrue(activity.getSharedPreferences("po-puti-session-v5",android.content.Context.MODE_PRIVATE).getAll().isEmpty());
                 android.widget.LinearLayout nav=feed.findViewWithTag("po-puti-search-nav");assertEquals(4,nav.getChildCount());
-                for(int n=0;n<4;n++){android.widget.LinearLayout tab=(android.widget.LinearLayout)nav.getChildAt(n);android.widget.TextView title=(android.widget.TextView)tab.getChildAt(1);assertEquals(1,title.getLineCount());assertTrue(title.getWidth()>0);}
+                for(int n=0;n<4;n++){android.widget.LinearLayout tab=(android.widget.LinearLayout)nav.getChildAt(n);android.widget.TextView title=(android.widget.TextView)tab.getChildAt(1);assertEquals(1,title.getLineCount());assertTrue(title.getWidth()>0);assertEquals("Navigation labels must be shown in full",0,title.getLayout().getEllipsisCount(0));}
                 android.widget.EditText date=findDate(feed);assertNotNull(date);assertNull("No manual ISO date entry",date.getKeyListener());assertEquals("10 мая",date.getText().toString());
                 assertTrue(feed.findViewWithTag("po-puti-search-scroll") instanceof android.widget.ScrollView);
                 assertTrue(feed.findViewWithTag("po-puti-search-submit").getBackground() instanceof android.graphics.drawable.RippleDrawable);
