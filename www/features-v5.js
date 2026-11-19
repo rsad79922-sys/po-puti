@@ -107,11 +107,16 @@ function mountWebAds(){
  webAdObserver?.disconnect();webAdObserver=new IntersectionObserver(entries=>{for(const entry of entries){if(!entry.isIntersecting)continue;const slot=entry.target,name=slot.dataset.adSlot,id=config.web.find(s=>s.name===name)?.id;if(!id||mountedAds.has(name))continue;mountedAds.add(name);slot.hidden=false;window.yaContextCb.push(()=>{if(!featureState.consent||!document.contains(slot))return;try{window.Ya.Context.AdvManager.render({blockId:id,renderTo:'ad-'+name,onError:()=>{slot.hidden=true},onNoAds:()=>{slot.hidden=true}})}catch{slot.hidden=true}});webAdObserver.unobserve(slot)}});
  for(const slot of document.querySelectorAll('[data-ad-slot]')){if(mountedAds.has(slot.dataset.adSlot))continue;const id=config.web.find(s=>s.name===slot.dataset.adSlot)?.id;if(id){slot.hidden=false;webAdObserver.observe(slot);setTimeout(()=>{if(!slot.querySelector('iframe'))slot.hidden=true},8000)}}
 }
+function mergeNativeQuery(data){
+ const previous=db.search||{},next={...previous,from:data.from,to:data.to,date:data.date};
+ for(const side of ['from','to'])if(next[side]!==previous[side])delete next[side+'Code'];
+ db.search=next;
+}
 async function syncNativeSearch(){
  const bridge=nativeBridge(),session=accessToken;if(!nativeFeatureBound){nativeFeatureBound=true;
-  await bridge.addListener('search',data=>{db.search={from:data.from,to:data.to,date:data.date};featureState.filter=['all','private','bus'].includes(data.filter)?data.filter:'all';featureState.queryKey='';save();runUnifiedSearch()});
+  await bridge.addListener('search',data=>{mergeNativeQuery(data);featureState.filter=['all','private','bus'].includes(data.filter)?data.filter:'all';featureState.queryKey='';save();runUnifiedSearch()});
   await bridge.addListener('nativeSearchError',()=>{nativeSearchFailed=true;nativeSearchVisible=false;bridge.closeSearch().catch(()=>{})});
-  await bridge.addListener('filter',data=>{if(typeof data.from==='string')db.search={from:data.from,to:data.to,date:data.date};save();featureState.filter=['all','private','bus'].includes(data.filter)?data.filter:'all';render()});
+  await bridge.addListener('filter',data=>{if(typeof data.from==='string')mergeNativeQuery(data);save();featureState.filter=['all','private','bus'].includes(data.filter)?data.filter:'all';render()});
   await bridge.addListener('place',data=>{if(['from','to'].includes(data.side)){db.search[data.side+'Code']=data.code;save();runUnifiedSearch()}});
   await bridge.addListener('navigate',data=>{nativeSearchVisible=false;if(['trips','notifications','profile'].includes(data.route))navigate('/'+data.route)});
   await bridge.addListener('refreshSearch',()=>{featureState.queryKey='';runUnifiedSearch()});

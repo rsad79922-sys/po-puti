@@ -101,7 +101,7 @@ public class SignedReleaseFlowTest {
             scenario.onActivity(activity->{
                 View root=activity.findViewById(android.R.id.content).findViewWithTag("po-puti-native-search");
                 assertNotNull("Native search layout must be present",root);
-                EditText from=input(root,"Откуда"),to=input(root,"Куда"),when=input(root,"Дата: ГГГГ-ММ-ДД");Button find=button(root,"Найти поездку");
+                EditText from=input(root,"Откуда"),to=input(root,"Куда"),when=input(root,"Выберите дату");Button find=button(root,"Найти поездку");
                 assertNotNull(from);assertNotNull(to);assertNotNull(when);assertNotNull(find);
                 from.setText("Москва");to.setText("Тверь");when.setText(date);assertTrue(find.performClick());
             });

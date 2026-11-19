@@ -37,14 +37,18 @@ public final class PoPutiRuStoreState {
   synchronized(LOCK){String token=session(context);return !token.isEmpty()&&prefs(context).getBoolean("enabled",false)&&fingerprint(token).equals(prefs(context).getString("session",""));}
  }
  static String recipient(Context context){synchronized(LOCK){return active(context)?prefs(context).getString("recipient",""):"";}}
- static void activate(Context context,String userId,String deviceId,String expectedSession){
+ static String provider(Context context){return prefs(context).getString("provider","rustore");}
+ static void activate(Context context,String userId,String deviceId,String expectedSession){activate(context,userId,deviceId,expectedSession,"rustore");}
+ static void activate(Context context,String userId,String deviceId,String expectedSession,String provider){
+  if(!provider.equals("fcm")&&!provider.equals("rustore"))throw new IllegalArgumentException();
   synchronized(LOCK){if(expectedSession.isEmpty()||!expectedSession.equals(session(context)))throw new IllegalStateException("Session changed");
-   if(!prefs(context).edit().putBoolean("enabled",true).putString("recipient",userId).putString("device",deviceId).putString("session",fingerprint(expectedSession)).commit())throw new IllegalStateException("Push settings unavailable");channel(context);
+   if(!prefs(context).edit().putBoolean("enabled",true).putString("provider",provider).putString("recipient",userId).putString("device",deviceId).putString("session",fingerprint(expectedSession)).commit())throw new IllegalStateException("Push settings unavailable");channel(context);
   }
  }
  static void disable(Context context,boolean deleteSdkToken){
-  synchronized(LOCK){prefs(context).edit().clear().commit();clearDelivered(context);
-   if(deleteSdkToken&&PoPutiApplication.rustoreConfigured()&&RuStorePushClient.INSTANCE.isInitialized())RuStorePushClient.INSTANCE.deleteToken().addOnFailureListener(error->{});
+  synchronized(LOCK){String provider=provider(context);prefs(context).edit().clear().commit();clearDelivered(context);
+   if(deleteSdkToken&&provider.equals("fcm"))PoPutiFcm.disable(context);
+   if(deleteSdkToken&&provider.equals("rustore")&&PoPutiApplication.rustoreConfigured()&&RuStorePushClient.INSTANCE.isInitialized())RuStorePushClient.INSTANCE.deleteToken().addOnFailureListener(error->{});
   }
  }
  static void clearDelivered(Context context){NotificationManager manager=(NotificationManager)context.getSystemService(Context.NOTIFICATION_SERVICE);if(manager!=null)manager.cancelAll();}
@@ -64,11 +68,11 @@ public final class PoPutiRuStoreState {
   }
  }
  static void syncToken(Context context,String token){
-  String expectedSession,deviceId,userId;
-  synchronized(LOCK){if(!active(context)||token==null||!token.matches("[A-Za-z0-9_:.-]{30,4096}"))return;expectedSession=session(context);deviceId=prefs(context).getString("device","");userId=recipient(context);}
+  String expectedSession,deviceId,userId,provider;
+  synchronized(LOCK){if(!active(context)||token==null||!token.matches("[A-Za-z0-9_:.-]{30,4096}"))return;expectedSession=session(context);deviceId=prefs(context).getString("device","");userId=recipient(context);provider=provider(context);}
   HttpURLConnection connection=null;
   try{
-   JSONObject payload=new JSONObject().put("platform","android").put("provider","rustore").put("deviceId",deviceId).put("token",token);
+   JSONObject payload=new JSONObject().put("platform","android").put("provider",provider).put("deviceId",deviceId).put("token",token);
    synchronized(LOCK){if(!accepts(context,userId)||!expectedSession.equals(session(context)))return;}
    connection=(HttpURLConnection)new URL("https://vputipoputka.ru/api/push/subscribe").openConnection();connection.setInstanceFollowRedirects(false);connection.setConnectTimeout(8000);connection.setReadTimeout(8000);connection.setRequestMethod("POST");connection.setDoOutput(true);connection.setRequestProperty("Content-Type","application/json");connection.setRequestProperty("Authorization","Bearer "+expectedSession);
    byte[] bytes=payload.toString().getBytes(StandardCharsets.UTF_8);connection.setFixedLengthStreamingMode(bytes.length);try(OutputStream out=connection.getOutputStream()){out.write(bytes);}

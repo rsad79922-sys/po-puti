@@ -18,13 +18,13 @@ public class PoPutiRuStorePushPlugin extends Plugin {
   if(Build.VERSION.SDK_INT>=33&&getPermissionState("notifications")!=PermissionState.GRANTED){requestPermissionForAlias("notifications",call,"registrationPermission");return;}
   registerToken(call);
  }
- @PermissionCallback private void registrationPermission(PluginCall call){if(getPermissionState("notifications")==PermissionState.GRANTED)registerToken(call);else call.reject("Уведомления не разрешены");}
+ @PermissionCallback private void registrationPermission(PluginCall call){if(getPermissionState("notifications")==PermissionState.GRANTED)registerToken(call);else call.reject("Уведомления не разрешены","PERMISSION_DENIED");}
  private void registerToken(PluginCall call){
   try{PoPutiApplication.initialize(getActivity().getApplication());}catch(RuntimeException ignored){call.reject("Не удалось запустить RuStore Push");return;}
   RuStorePushClient.INSTANCE.checkPushAvailability().addOnSuccessListener(result->{
-   if(!(result instanceof FeatureAvailabilityResult.Available)){call.reject("RuStore Push недоступен на устройстве. Проверьте приложение RuStore и разрешение фоновой работы.");return;}
+   if(!(result instanceof FeatureAvailabilityResult.Available)){call.reject("RuStore Push недоступен на устройстве. Проверьте приложение RuStore и разрешение фоновой работы.","PROVIDER_UNAVAILABLE");return;}
    RuStorePushClient.INSTANCE.getToken().addOnSuccessListener(token->call.resolve(new JSObject().put("token",token))).addOnFailureListener(error->call.reject("Не удалось зарегистрировать устройство RuStore"));
-  }).addOnFailureListener(error->call.reject("Не удалось проверить доступность RuStore Push"));
+  }).addOnFailureListener(error->call.reject("Не удалось проверить доступность RuStore Push","PROVIDER_UNAVAILABLE"));
  }
  @PluginMethod public void activate(PluginCall call){
   String userId=call.getString("userId",""),device=call.getString("deviceId",""),expected=call.getString("sessionToken","");

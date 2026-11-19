@@ -1,3 +1,4 @@
+import {firebaseClientConfig,fcmDataMessage} from './firebase-config.mjs';
 import * as webpush from 'web-push';
 import {GoogleAuth,JWT} from 'google-auth-library';
 import {readFileSync} from 'node:fs';
@@ -13,13 +14,14 @@ export function createPush({env=process.env,sendWeb,sendAndroid,sendRustore,fetc
  const webReady=!!(env.VAPID_PUBLIC_KEY&&env.VAPID_PRIVATE_KEY&&env.VAPID_SUBJECT);
  const androidReady=!!sendAndroid||!!(env.FCM_PROJECT_ID&&(env.FCM_SERVICE_ACCOUNT_JSON||env.GOOGLE_APPLICATION_CREDENTIALS));
  const rustoreReady=!!sendRustore||!!(/^[A-Za-z0-9_-]{1,200}$/.test(env.RUSTORE_PUSH_PROJECT_ID||'')&&env.RUSTORE_PUSH_SERVICE_TOKEN);
+ const androidClientConfig=firebaseClientConfig(env.FCM_ANDROID_CONFIG_JSON,env.FCM_PROJECT_ID);
  let auth;
  if(androidReady&&!sendAndroid){
   const config=env.FCM_SERVICE_ACCOUNT_JSON;const credentials=JSON.parse(config?.trim().startsWith('{')?config:readFileSync(config||env.GOOGLE_APPLICATION_CREDENTIALS,'utf8'));
   if(credentials.type!=='service_account'||!String(credentials.client_email||'').endsWith('.gserviceaccount.com')||!String(credentials.private_key||'').includes('BEGIN PRIVATE KEY')||credentials.project_id!==env.FCM_PROJECT_ID)throw Error('Invalid FCM service-account configuration');
   auth=new GoogleAuth({authClient:new JWT({email:credentials.client_email,key:credentials.private_key,scopes:['https://www.googleapis.com/auth/firebase.messaging']})});
  }
- const available=()=>({web:webReady,android:androidReady,rustore:rustoreReady,rustoreProjectId:rustoreReady?env.RUSTORE_PUSH_PROJECT_ID||null:null,androidProviders:{fcm:androidReady,rustore:rustoreReady},vapidPublicKey:webReady?env.VAPID_PUBLIC_KEY:null});
+ const available=()=>({web:webReady,android:androidReady,rustore:rustoreReady,rustoreProjectId:rustoreReady?env.RUSTORE_PUSH_PROJECT_ID||null:null,androidClientConfig:androidReady?androidClientConfig:null,androidProviders:{fcm:androidReady,rustore:rustoreReady},vapidPublicKey:webReady?env.VAPID_PUBLIC_KEY:null});
  async function deliver(sub,payload){
   if(sub.platform==='web'){
    if(!webReady&&!sendWeb)throw Object.assign(Error('Push not configured'),{retryable:false});
@@ -45,7 +47,7 @@ export function createPush({env=process.env,sendWeb,sendAndroid,sendRustore,fetc
   if(!androidReady&&!sendAndroid)throw Object.assign(Error('Native push not configured'),{retryable:false});
   if(sendAndroid)return sendAndroid(sub.address,payload);
   const client=await auth.getClient();
-  try{return await client.request({url:'https://fcm.googleapis.com/v1/projects/'+encodeURIComponent(env.FCM_PROJECT_ID)+'/messages:send',method:'POST',timeout:10000,data:{message:{token:sub.address,notification:{title:payload.title,body:payload.body},data:{path:payload.path,notificationId:payload.notificationId},android:{priority:'high',notification:{channel_id:'trip_updates',notification_count:payload.badge,tag:payload.notificationId}}}}})}
+  try{return await client.request({url:'https://fcm.googleapis.com/v1/projects/'+encodeURIComponent(env.FCM_PROJECT_ID)+'/messages:send',method:'POST',timeout:10000,data:fcmDataMessage(sub.address,payload)})}
   catch(e){const invalid=e.response?.data?.error?.details?.some(x=>x.errorCode==='UNREGISTERED');throw Object.assign(Error('FCM delivery failed'),{statusCode:invalid?410:e.response?.status||503})}
  }
  return {available,deliver};

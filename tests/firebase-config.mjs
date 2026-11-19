@@ -1,0 +1,14 @@
+import assert from 'node:assert/strict';
+import {firebaseClientConfig,fcmDataMessage} from '../server/firebase-config.mjs';
+const fixture={project_info:{project_id:'fixture-project',project_number:'123456789'},client:[{client_info:{mobilesdk_app_id:'1:123456789:android:aabbcc',android_client_info:{package_name:'ru.poputi.app'}},api_key:[{current_key:'AIza'+'x'.repeat(35)}]}],private_key:'MUST NEVER LEAVE SERVER'};
+assert.equal(firebaseClientConfig('', 'fixture-project'),null);
+const result=firebaseClientConfig(JSON.stringify(fixture),'fixture-project');
+assert.deepEqual(Object.keys(result).sort(),['apiKey','applicationId','projectId','senderId']);
+assert(!JSON.stringify(result).includes(fixture.private_key));
+assert.throws(()=>firebaseClientConfig(fixture,'other-project'),/Invalid Firebase/);
+assert.throws(()=>firebaseClientConfig({...fixture,client:[]},'fixture-project'),/Invalid Firebase/);
+const message=fcmDataMessage('fixture-token',{path:'/notifications',notificationId:'note',recipientId:'account',title:'Private name',body:'Private phone',badge:2});
+assert.equal(message.message.notification,undefined);assert.equal(message.message.android.notification,undefined);
+assert.equal(message.message.data.recipientId,'account');assert(!JSON.stringify(message).includes('Private'));
+assert.equal(message.message.android.priority,'high');assert.equal(message.message.android.ttl,'86400s');
+console.log('PASS: matching Firebase Android package/project, allowlisted client identifiers, private service credential exclusion, recipient-bound data-only FCM payload');

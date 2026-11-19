@@ -25,6 +25,7 @@ public class SharedUiSmokeTest {
             assertEquals("isolated-notification-session",PoPutiRuStoreState.session(context));
             PoPutiRuStoreState.activate(context,"fixture-account","fixture-device-1234","isolated-notification-session");
             java.util.Map<String,String> data=new java.util.HashMap<>();data.put("notificationId","fixture-note");data.put("recipientId","fixture-account");data.put("path","https://attacker.invalid/");
+            scenario.moveToState(androidx.lifecycle.Lifecycle.State.CREATED); // UI is stopped: service must display without the WebView.
             PoPutiRuStoreState.display(context,data);PoPutiRuStoreState.display(context,data);
             android.app.NotificationManager manager=(android.app.NotificationManager)context.getSystemService(android.content.Context.NOTIFICATION_SERVICE);
             awaitNotificationCount(manager,1);
@@ -97,6 +98,7 @@ public class SharedUiSmokeTest {
             scenario.onActivity(activity -> activity.getBridge().getWebView().evaluateJavascript("window.nativeSecureOk",answer->{secureValue.set(answer);secureCheck.countDown();}));
             assertTrue(secureCheck.await(5,TimeUnit.SECONDS));
             assertEquals("Keystore round-trip must preserve the session", "true", secureValue.get());
+            androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().waitForIdleSync();Thread.sleep(300);
             scenario.onActivity(activity -> {
                 android.view.View feed=activity.findViewById(android.R.id.content).findViewWithTag("po-puti-native-search");
                 String texts=allText(feed);
@@ -110,9 +112,27 @@ public class SharedUiSmokeTest {
                 assertFalse(texts.contains("Отправить заявку"));
                 assertFalse(texts.contains("Позвонить"));
                 assertTrue(activity.getSharedPreferences("po-puti-session-v5",android.content.Context.MODE_PRIVATE).getAll().isEmpty());
+                android.widget.LinearLayout nav=feed.findViewWithTag("po-puti-search-nav");assertEquals(4,nav.getChildCount());
+                for(int n=0;n<4;n++){android.widget.LinearLayout tab=(android.widget.LinearLayout)nav.getChildAt(n);android.widget.TextView title=(android.widget.TextView)tab.getChildAt(1);assertEquals(1,title.getLineCount());assertTrue(title.getWidth()>0);}
+                android.widget.EditText date=findDate(feed);assertNotNull(date);assertNull("No manual ISO date entry",date.getKeyListener());assertEquals("10 мая",date.getText().toString());
+                assertTrue(feed.findViewWithTag("po-puti-search-scroll") instanceof android.widget.ScrollView);
+                assertTrue(feed.findViewWithTag("po-puti-search-submit").getBackground() instanceof android.graphics.drawable.RippleDrawable);
+
             });
+            screenshot("search-bus");
+            scenario.onActivity(activity -> findDate(activity.findViewById(android.R.id.content).findViewWithTag("po-puti-native-search")).performClick());
+            screenshot("search-day-month");shell("input keyevent 4");
+            CountDownLatch emptyDone=new CountDownLatch(1);
+            scenario.onActivity(activity->activity.getBridge().getWebView().evaluateJavascript("Capacitor.Plugins.PoPutiFeatures.showSearch({query:{from:'Уфа',to:'Казань',date:'2030-11-20'},filter:'all',wantedEnabled:true,ads:{enabled:false},items:[]})",answer->emptyDone.countDown()));
+            assertTrue(emptyDone.await(5,TimeUnit.SECONDS));Thread.sleep(300);screenshot("search-empty");
         }
     }
+    private static android.widget.EditText findDate(android.view.View view){
+        if(view instanceof android.widget.EditText&&"Выберите дату".contentEquals(((android.widget.EditText)view).getHint()))return (android.widget.EditText)view;
+        if(view instanceof android.view.ViewGroup){android.view.ViewGroup group=(android.view.ViewGroup)view;for(int i=0;i<group.getChildCount();i++){android.widget.EditText found=findDate(group.getChildAt(i));if(found!=null)return found;}}return null;
+    }
+    private static void shell(String command)throws Exception{try(java.io.InputStream input=new android.os.ParcelFileDescriptor.AutoCloseInputStream(androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().getUiAutomation().executeShellCommand(command))){byte[] buffer=new byte[4096];while(input.read(buffer)!=-1){}}}
+    private static void screenshot(String name)throws Exception{androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().waitForIdleSync();Thread.sleep(400);shell("screencap -p /sdcard/Download/po-puti-"+name+".png");}
     private static String allText(android.view.View view){
         StringBuilder out=new StringBuilder();
         if(view instanceof android.widget.TextView)out.append(((android.widget.TextView)view).getText()).append('\n');

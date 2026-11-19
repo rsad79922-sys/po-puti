@@ -20,3 +20,5 @@ await copyFile('tests/native-android/SignedReleaseFlowTest.java',tests+'/SignedR
 await mkdir('android/app/src/test/java/ru/poputi/app',{recursive:true});
 await copyFile('tests/native-android/PushPolicyTest.java','android/app/src/test/java/ru/poputi/app/PushPolicyTest.java');
 console.log('DIRECT_RELEASE_TESTS_PREPARED: non-debuggable release + separate signed instrumentation APK');
+
+await copyFile('tests/native-android/SearchDateTest.java','android/app/src/test/java/ru/poputi/app/SearchDateTest.java');

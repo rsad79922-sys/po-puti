@@ -10,7 +10,7 @@ public class PoPutiApplication extends Application {
  public static synchronized void initialize(Application app){if(rustoreConfigured()&&!RuStorePushClient.INSTANCE.isInitialized())RuStorePushClient.INSTANCE.init(app,BuildConfig.RUSTORE_PUSH_PROJECT_ID,new QuietLogger());}
  @Override public void onCreate(){
   super.onCreate();
-  if(getSharedPreferences(PoPutiRuStoreState.PREFS,MODE_PRIVATE).getBoolean("enabled",false))try{initialize(this);}catch(RuntimeException ignored){}
+  if(getSharedPreferences(PoPutiRuStoreState.PREFS,MODE_PRIVATE).getBoolean("enabled",false))try{if("fcm".equals(PoPutiRuStoreState.provider(this)))PoPutiFcm.initialize(this,null);else initialize(this);}catch(RuntimeException ignored){}
  }
  private static final class QuietLogger implements Logger {
   public void verbose(String message,Throwable error){}
