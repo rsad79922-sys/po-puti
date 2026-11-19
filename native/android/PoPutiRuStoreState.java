@@ -54,8 +54,8 @@ public final class PoPutiRuStoreState {
  static void clearDelivered(Context context){NotificationManager manager=(NotificationManager)context.getSystemService(Context.NOTIFICATION_SERVICE);if(manager!=null)manager.cancelAll();}
  static void channel(Context context){if(Build.VERSION.SDK_INT>=26){NotificationManager manager=(NotificationManager)context.getSystemService(Context.NOTIFICATION_SERVICE);if(manager!=null)manager.createNotificationChannel(new NotificationChannel(CHANNEL,"Поездки и отзывы",NotificationManager.IMPORTANCE_DEFAULT));}}
  static boolean accepts(Context context,String userId){synchronized(LOCK){return PoPutiPushPolicy.accepts(prefs(context).getString("recipient",""),userId,prefs(context).getBoolean("enabled",false),active(context));}}
- static void display(Context context,Map<String,String> data){
-  synchronized(LOCK){String id=data.get("notificationId"),userId=data.get("recipientId");
+ static void display(Context context,Map<String,String> data,String expectedProvider){
+  synchronized(LOCK){if(!expectedProvider.equals(provider(context)))return;String id=data.get("notificationId"),userId=data.get("recipientId");
    if(!accepts(context,userId)||!PoPutiPushPolicy.validNotificationId(id))return;
    if(Build.VERSION.SDK_INT>=33&&context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)!=PackageManager.PERMISSION_GRANTED)return;
    Set<String> seen=new LinkedHashSet<>(prefs(context).getStringSet("seen",Collections.emptySet()));if(seen.contains(id))return;
@@ -67,13 +67,13 @@ public final class PoPutiRuStoreState {
    try{manager.notify(id,0,notification);seen.add(id);while(seen.size()>100)seen.remove(seen.iterator().next());prefs(context).edit().putStringSet("seen",seen).apply();}catch(SecurityException ignored){}
   }
  }
- static void syncToken(Context context,String token){
+ static void syncToken(Context context,String token,String expectedProvider){
   String expectedSession,deviceId,userId,provider;
-  synchronized(LOCK){if(!active(context)||token==null||!token.matches("[A-Za-z0-9_:.-]{30,4096}"))return;expectedSession=session(context);deviceId=prefs(context).getString("device","");userId=recipient(context);provider=provider(context);}
+  synchronized(LOCK){if(!expectedProvider.equals(provider(context))||!active(context)||token==null||!token.matches("[A-Za-z0-9_:.-]{30,4096}"))return;expectedSession=session(context);deviceId=prefs(context).getString("device","");userId=recipient(context);provider=provider(context);}
   HttpURLConnection connection=null;
   try{
-   JSONObject payload=new JSONObject().put("platform","android").put("provider",provider).put("deviceId",deviceId).put("token",token);
-   synchronized(LOCK){if(!accepts(context,userId)||!expectedSession.equals(session(context)))return;}
+   JSONObject payload=new JSONObject().put("platform","android").put("provider",provider).put("refreshOnly",true).put("deviceId",deviceId).put("token",token);
+   synchronized(LOCK){if(!expectedProvider.equals(provider(context))||!accepts(context,userId)||!expectedSession.equals(session(context)))return;}
    connection=(HttpURLConnection)new URL("https://vputipoputka.ru/api/push/subscribe").openConnection();connection.setInstanceFollowRedirects(false);connection.setConnectTimeout(8000);connection.setReadTimeout(8000);connection.setRequestMethod("POST");connection.setDoOutput(true);connection.setRequestProperty("Content-Type","application/json");connection.setRequestProperty("Authorization","Bearer "+expectedSession);
    byte[] bytes=payload.toString().getBytes(StandardCharsets.UTF_8);connection.setFixedLengthStreamingMode(bytes.length);try(OutputStream out=connection.getOutputStream()){out.write(bytes);}
    if(connection.getResponseCode()==401)synchronized(LOCK){if(expectedSession.equals(session(context)))disable(context,false);}

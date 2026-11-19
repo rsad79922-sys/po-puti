@@ -70,6 +70,7 @@ export function pushApi(l,actor,path,method,data){
   const other=get('SELECT * FROM push_subscriptions WHERE address=?',address);
   if(other&&other.user_id!==actor.id&&other.active)throw fail('Устройство связано с другой сессией. Сначала отключите уведомления в ней.',409);
   const own=get('SELECT * FROM push_subscriptions WHERE user_id=? AND device_id=? AND platform=?',actor.id,device,data.platform);
+  if(data.refreshOnly===true&&(!own||!own.active||data.platform!=='android'||(JSON.parse(own.keys_json||'{}').provider||'fcm')!==provider))throw fail('Подписка отключена или транспорт изменился. Включите уведомления повторно.',409);
   if(other&&!own){run('UPDATE push_outbox SET status=\'cancelled\' WHERE subscription_id=? AND status IN (\'pending\',\'retry\',\'sending\')',other.id);run('UPDATE push_subscriptions SET user_id=?,device_id=?,keys_json=?,active=1 WHERE id=?',actor.id,device,JSON.stringify(keys),other.id);return {id:other.id}}
   if(own){if(other&&other.id!==own.id)throw fail('Подписка уже существует',409);run('UPDATE push_subscriptions SET address=?,keys_json=?,active=1 WHERE id=?',address,JSON.stringify(keys),own.id);return {id:own.id}}
   const id=randomUUID();run('INSERT INTO push_subscriptions(id,user_id,device_id,platform,address,keys_json,created_at,active) VALUES(?,?,?,?,?,?,?,1)',id,actor.id,device,data.platform,address,JSON.stringify(keys),clock());return {id};
