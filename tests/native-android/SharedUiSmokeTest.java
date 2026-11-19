@@ -121,12 +121,16 @@ public class SharedUiSmokeTest {
             });
             screenshot("search-bus");
             scenario.onActivity(activity -> findDate(activity.findViewById(android.R.id.content).findViewWithTag("po-puti-native-search")).performClick());
-            screenshot("search-day-month");shell("input keyevent 4");
+            screenshot("search-day-month");
+            android.view.accessibility.AccessibilityNodeInfo window=androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().getUiAutomation().getRootInActiveWindow();
+            assertNotNull(window);assertEquals("Only day and month, no year wheel",2,countPickers(window));
+            shell("input keyevent 4");
             CountDownLatch emptyDone=new CountDownLatch(1);
             scenario.onActivity(activity->activity.getBridge().getWebView().evaluateJavascript("Capacitor.Plugins.PoPutiFeatures.showSearch({query:{from:'Уфа',to:'Казань',date:'2030-11-20'},filter:'all',wantedEnabled:true,ads:{enabled:false},items:[]})",answer->emptyDone.countDown()));
             assertTrue(emptyDone.await(5,TimeUnit.SECONDS));Thread.sleep(300);screenshot("search-empty");
         }
     }
+    private static int countPickers(android.view.accessibility.AccessibilityNodeInfo node){int count="android.widget.NumberPicker".contentEquals(node.getClassName())?1:0;for(int i=0;i<node.getChildCount();i++){android.view.accessibility.AccessibilityNodeInfo child=node.getChild(i);if(child!=null)count+=countPickers(child);}return count;}
     private static android.widget.EditText findDate(android.view.View view){
         if(view instanceof android.widget.EditText&&"Выберите дату".contentEquals(((android.widget.EditText)view).getHint()))return (android.widget.EditText)view;
         if(view instanceof android.view.ViewGroup){android.view.ViewGroup group=(android.view.ViewGroup)view;for(int i=0;i<group.getChildCount();i++){android.widget.EditText found=findDate(group.getChildAt(i));if(found!=null)return found;}}return null;
