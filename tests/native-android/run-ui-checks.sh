@@ -6,7 +6,7 @@ destination="$PWD/out/search-ui/$screen"
 mkdir -p "$destination"
 save_screens() {
   local status=$?
-  for name in search-bus search-day-month search-empty; do
+  for name in search-bus search-results search-day-month search-empty; do
     adb pull "/sdcard/Download/po-puti-$name.png" "$destination/$name.png" >/dev/null 2>&1 || true
   done
   return "$status"

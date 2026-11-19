@@ -123,6 +123,9 @@ public class SharedUiSmokeTest {
                 assertTrue(feed.findViewWithTag("po-puti-search-submit").getBackground() instanceof android.graphics.drawable.RippleDrawable);
 
             });
+            scenario.onActivity(activity->((android.widget.ScrollView)activity.findViewById(android.R.id.content).findViewWithTag("po-puti-search-scroll")).fullScroll(android.view.View.FOCUS_DOWN));
+            screenshot("search-results");
+            scenario.onActivity(activity->((android.widget.ScrollView)activity.findViewById(android.R.id.content).findViewWithTag("po-puti-search-scroll")).fullScroll(android.view.View.FOCUS_UP));
             scenario.onActivity(activity -> findDate(activity.findViewById(android.R.id.content).findViewWithTag("po-puti-native-search")).performClick());
             screenshot("search-day-month");
             android.view.accessibility.AccessibilityNodeInfo window=androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().getUiAutomation().getRootInActiveWindow();
