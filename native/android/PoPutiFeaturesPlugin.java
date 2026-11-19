@@ -68,6 +68,7 @@ public class PoPutiFeaturesPlugin extends Plugin {
  private LocalDate nearestDate(int month,int day){return PoPutiSearchDate.next(LocalDate.now(),month,day);}
 
  private void chooseDate(){
+  root.requestFocus();((android.view.inputmethod.InputMethodManager)getContext().getSystemService(Context.INPUT_METHOD_SERVICE)).hideSoftInputFromWindow(root.getWindowToken(),0);
   readDate();LinearLayout pickers=new LinearLayout(getContext());pickers.setGravity(android.view.Gravity.CENTER);pickers.setPadding(dp(16),dp(8),dp(16),dp(8));
   NumberPicker day=new NumberPicker(getContext()),month=new NumberPicker(getContext());day.setContentDescription("День");month.setContentDescription("Месяц");day.setDescendantFocusability(NumberPicker.FOCUS_BLOCK_DESCENDANTS);month.setDescendantFocusability(NumberPicker.FOCUS_BLOCK_DESCENDANTS);
   month.setMinValue(1);month.setMaxValue(12);month.setDisplayedValues(new String[]{"Январь","Февраль","Март","Апрель","Май","Июнь","Июль","Август","Сентябрь","Октябрь","Ноябрь","Декабрь"});month.setValue(selectedDate.getMonthValue());day.setMinValue(1);day.setMaxValue(nearestDate(month.getValue(),selectedDate.getDayOfMonth()).lengthOfMonth());day.setValue(Math.min(selectedDate.getDayOfMonth(),day.getMaxValue()));

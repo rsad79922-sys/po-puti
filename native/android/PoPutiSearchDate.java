@@ -2,8 +2,6 @@ package ru.poputi.app;
 
 import java.time.LocalDate;
 import java.time.YearMonth;
-import java.time.format.DateTimeFormatter;
-import java.util.Locale;
 
 /** A day/month choice means its next occurrence, with the year retained in the API. */
 public final class PoPutiSearchDate {
@@ -15,5 +13,6 @@ public final class PoPutiSearchDate {
   if(candidate.isBefore(today)){year++;candidate=LocalDate.of(year,month,Math.min(day,YearMonth.of(year,month).lengthOfMonth()));}
   return candidate;
  }
- public static String label(LocalDate date){return date.format(DateTimeFormatter.ofPattern("d MMMM",new Locale("ru")));}
+ private static final String[] MONTHS={"января","февраля","марта","апреля","мая","июня","июля","августа","сентября","октября","ноября","декабря"};
+ public static String label(LocalDate date){return date.getDayOfMonth()+" "+MONTHS[date.getMonthValue()-1];}
 }

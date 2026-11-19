@@ -98,7 +98,7 @@ public class SharedUiSmokeTest {
             scenario.onActivity(activity -> activity.getBridge().getWebView().evaluateJavascript("window.nativeSecureOk",answer->{secureValue.set(answer);secureCheck.countDown();}));
             assertTrue(secureCheck.await(5,TimeUnit.SECONDS));
             assertEquals("Keystore round-trip must preserve the session", "true", secureValue.get());
-            androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().waitForIdleSync();Thread.sleep(300);
+            androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().waitForIdleSync();Thread.sleep(300);screenshot("search-bus");
             scenario.onActivity(activity -> {
                 android.view.View feed=activity.findViewById(android.R.id.content).findViewWithTag("po-puti-native-search");
                 String texts=allText(feed);
@@ -119,7 +119,6 @@ public class SharedUiSmokeTest {
                 assertTrue(feed.findViewWithTag("po-puti-search-submit").getBackground() instanceof android.graphics.drawable.RippleDrawable);
 
             });
-            screenshot("search-bus");
             scenario.onActivity(activity -> findDate(activity.findViewById(android.R.id.content).findViewWithTag("po-puti-native-search")).performClick());
             screenshot("search-day-month");
             android.view.accessibility.AccessibilityNodeInfo window=androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().getUiAutomation().getRootInActiveWindow();
