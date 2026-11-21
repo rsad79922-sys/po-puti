@@ -17,7 +17,7 @@ import {migrateFeatures} from './migrations-v5.mjs';
 import {rideSeries} from './ride-series.mjs';
 import {safeTicketUrl,prepareTimetableCache,timetables} from './timetables.mjs';
 import {clientConfig,renderPrivacyDocument} from './client-config.mjs';
-import {serveAndroidApk} from './android-download.mjs';
+import {serveAndroidApk,serveAndroidRelease} from './android-download.mjs';
 import {adminMfa} from './admin-mfa.mjs';
 import {accountPrivacy} from './account-privacy.mjs';
 import {migrateRouting} from './migrations-v4.mjs';
@@ -400,8 +400,12 @@ const appScreen = /^\/(?:login|search|publish|trips|wanted|wanted-new|notificati
 async function serveStatic(req,res,pathname){
  let path=pathname==='/'?'/index.html':pathname;
  try{path=decodeURIComponent(path)}catch{throw jsonError('Неверный путь',400)}
- if(path==='/downloads/po-puti.apk'){
-  if(!await serveAndroidApk(req,res,join(APK_DOWNLOADS,'po-puti.apk')))throw jsonError('APK пока не опубликован',404);
+ if(path==='/downloads/android-release.json'){
+  if(!await serveAndroidRelease(req,res,APK_DOWNLOADS))throw jsonError('Обновление пока не опубликовано',404);
+  return;
+ }
+ if(path==='/downloads/po-puti.apk'||/^\/downloads\/po-puti-[1-9]\d{0,8}\.apk$/.test(path)){
+  if(!await serveAndroidApk(req,res,join(APK_DOWNLOADS,path.slice('/downloads/'.length))))throw jsonError('APK пока не опубликован',404);
   return;
  }
  if(path==='/admin'||path==='/admin/'){const actor=requireActor(req);requireAdmin(actor)}

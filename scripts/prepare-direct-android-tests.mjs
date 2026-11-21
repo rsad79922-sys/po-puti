@@ -22,3 +22,7 @@ await copyFile('tests/native-android/PushPolicyTest.java','android/app/src/test/
 console.log('DIRECT_RELEASE_TESTS_PREPARED: non-debuggable release + separate signed instrumentation APK');
 
 await copyFile('tests/native-android/SearchDateTest.java','android/app/src/test/java/ru/poputi/app/SearchDateTest.java');
+
+await copyFile('tests/native-android/UpdatePolicyTest.java','android/app/src/test/java/ru/poputi/app/UpdatePolicyTest.java');
+
+for(const name of ['UpgradeContinuityTest','UpdatePromptTest'])await copyFile('tests/native-android/'+name+'.java',tests+'/'+name+'.java');

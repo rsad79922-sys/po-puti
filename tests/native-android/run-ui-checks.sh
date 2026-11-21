@@ -17,4 +17,4 @@ adb shell wm size 640x1280
 adb shell wm density 320
 adb shell settings put system font_scale 1.15
 cd android
-./gradlew :app:connectedDebugAndroidTest --no-daemon -Pandroid.testInstrumentationRunnerArguments.class=ru.poputi.app.SharedUiSmokeTest
+./gradlew :app:connectedDebugAndroidTest --no-daemon -Pandroid.testInstrumentationRunnerArguments.class=ru.poputi.app.SharedUiSmokeTest,ru.poputi.app.UpdatePromptTest

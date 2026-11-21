@@ -218,3 +218,12 @@ document.addEventListener('click',async e=>{
  }catch(err){toast(err.message)}
 });
 setInterval(()=>{if(document.visibilityState==='visible'&&accessToken){wantedConfig();if(location.hash==='#/wanted'){wantedState.key='';loadWanted()}}},15000);
+
+// The native updater owns version/signature checks and the confirmation dialog.
+function androidUpdatesBridge(){
+ if(!window.Capacitor?.isPluginAvailable?.('PoPutiUpdates'))return null;
+ return window.Capacitor.registerPlugin?.('PoPutiUpdates')||window.Capacitor.Plugins?.PoPutiUpdates;
+}
+function androidUpdateMarkup(){return androidUpdatesBridge()?'<button class="btn btn-outline full" style="margin-bottom:12px" data-android-update>Проверить обновления</button>':''}
+async function checkAndroidUpdate(manual=true){try{await androidUpdatesBridge()?.check({manual})}catch{if(manual)toast('Не удалось проверить обновления. Попробуйте позже.')}}
+document.addEventListener('click',event=>{if(event.target.closest('[data-android-update]')){event.preventDefault();checkAndroidUpdate(true);}});

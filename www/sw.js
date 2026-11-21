@@ -1,7 +1,7 @@
 /* Network-first shell. Bump CACHE_NAME whenever the shell release changes.
    API traffic is never intercepted; the new worker activates immediately. */
 const CACHE_PREFIX = 'po-puti-shell-';
-const CACHE_NAME = CACHE_PREFIX + 'android-search-v11';
+const CACHE_NAME = CACHE_PREFIX + 'direct-updates-v12';
 const NETWORK_TIMEOUT_MS = 15000;
 const SHELL = new Map([
   ['/index.html', ['text/html']],

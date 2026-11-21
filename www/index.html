@@ -8,7 +8,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <title>По пути — едем вместе</title>
-  <link rel="stylesheet" href="/styles.css?v=android-search-v11">
+  <link rel="stylesheet" href="/styles.css?v=direct-updates-v12">
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="apple-touch-icon" href="/icons/icon-192.png">
   <link rel="icon" href="/icons/icon.svg" type="image/svg+xml">
@@ -66,10 +66,10 @@
     function loadApp(){
       status('Запускаем приложение…');
       var script=document.createElement('script');
-      script.src='/app.js?v=android-search-v11';
+      script.src='/app.js?v=direct-updates-v12';
       script.onload=ready;
       script.onerror=function(){fail('Не удалось загрузить app.js. Проверьте подключение.')};
-      var features=document.createElement('script');features.src='/features-v5.js?v=android-search-v11';features.onload=function(){document.body.appendChild(script)};features.onerror=function(){fail('Не удалось загрузить приложение. Повторите попытку.')};document.body.appendChild(features);
+      var features=document.createElement('script');features.src='/features-v5.js?v=direct-updates-v12';features.onload=function(){document.body.appendChild(script)};features.onerror=function(){fail('Не удалось загрузить приложение. Повторите попытку.')};document.body.appendChild(features);
     }
     function start(){
       if(started)return;
