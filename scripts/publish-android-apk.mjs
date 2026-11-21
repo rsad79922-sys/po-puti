@@ -26,7 +26,7 @@ export async function installDownload({artifact,expectedSha,dataDir,downloadsDir
  if(!directory.isDirectory()||directory.isSymbolicLink())throw Error('Unsafe APK download directory');
  // The web service can read APKs but cannot replace the signed distribution.
  await chown(downloads,process.getuid(),groupId);await chmod(downloads,0o750);
- const release=metadata?publicAndroidRelease(metadata):null,releasePath=join(downloads,'android-release.json');
+ const release=publicAndroidRelease(metadata),releasePath=join(downloads,'android-release.json');
  if(release&&(release.apkSHA256!==expectedSha||(await lstat(artifact)).size!==release.bytes))throw Error('Public release does not match APK');
  const oldRelease=await readAndroidRelease(downloads);
  if(oldRelease&&(!release||release.certificateSHA256!==oldRelease.certificateSHA256||release.versionCode<=oldRelease.versionCode))throw Error('Refusing signing-key change or release downgrade/reuse');
@@ -42,9 +42,9 @@ export async function installDownload({artifact,expectedSha,dataDir,downloadsDir
  await writeFile(join(backup,'po-puti.env'),oldEnv,{mode:0o600,flag:'wx',flush:true});
  if(previous){await copyFile(destination,join(backup,'previous.apk'),constants.COPYFILE_EXCL);await chmod(join(backup,'previous.apk'),0o600)}
  if(oldReleaseBody)await writeFile(join(backup,'android-release.json'),oldReleaseBody,{mode:0o600,flag:'wx',flush:true});
- const temp=destination+'.next-'+randomUUID();let installed=false,versionedInstalled=false,manifestInstalled=false;
+ const temp=destination+'.next-'+randomUUID(),versionTemp=versioned+'.next-'+randomUUID();let installed=false,versionedInstalled=false,manifestInstalled=false;
  try{
-  if(versioned){await copyFile(artifact,versioned,constants.COPYFILE_EXCL);versionedInstalled=true;await chown(versioned,process.getuid(),groupId);await chmod(versioned,0o640);}
+  await copyFile(artifact,versionTemp,constants.COPYFILE_EXCL);await chown(versionTemp,process.getuid(),groupId);await chmod(versionTemp,0o640);await rename(versionTemp,versioned);versionedInstalled=true;
   await copyFile(artifact,temp,constants.COPYFILE_EXCL);await chown(temp,process.getuid(),groupId);await chmod(temp,0o640);await rename(temp,destination);installed=true;
   if(release){await atomic(releasePath,JSON.stringify(release)+'\n',0o640,process.getuid(),groupId);manifestInstalled=true;}
   await atomic(envFile,downloadEnvironment(oldEnv.toString('utf8'),url,downloadsDir),envInfo.mode&0o777,envInfo.uid,envInfo.gid);
@@ -58,6 +58,7 @@ export async function installDownload({artifact,expectedSha,dataDir,downloadsDir
    else if(await sha256(destination)===expectedSha)await unlink(destination); // Only our failed candidate.
   }
   if(versionedInstalled)await unlink(versioned); // Only this failed candidate; older releases remain available.
+  try{await unlink(versionTemp)}catch(failure){if(failure.code!=='ENOENT')throw failure}
   try{await unlink(temp)}catch(failure){if(failure.code!=='ENOENT')throw failure}
   await restart();throw error;
  }
