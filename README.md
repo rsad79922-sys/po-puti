@@ -62,3 +62,5 @@ npm run android:open
 
 Баннер и единая настройка скачивания: [инструкция](docs/ANDROID-DIRECT-DOWNLOAD.md).
 RuStore не требуется; `ANDROID_DOWNLOAD_URL` остаётся пустым до проверки подписанного APK.
+
+Прямая установка Android/PWA и выпуск обновлений без магазина: [DIRECT-ANDROID-UPDATES.md](docs/DIRECT-ANDROID-UPDATES.md).

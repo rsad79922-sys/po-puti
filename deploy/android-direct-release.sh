@@ -26,6 +26,9 @@ if [[ "$mode" = sign ]]; then
  done
  echo 'SIGNED_APKS_RECEIVED: private signing key/password never left the VPS.'
 else
- scp "${options[@]}" -P "$port" scripts/publish-android-apk.mjs "$host:$stage/publish-android-apk.mjs"
- ssh "${options[@]}" -p "$port" "$host" "chmod 0600 '$stage/publish-android-apk.mjs'; node '$stage/publish-android-apk.mjs' '$stage' '$GITHUB_SHA'"
+ ssh "${options[@]}" -p "$port" "$host" "install -d -m 0700 '$stage/scripts' '$stage/server'"
+ scp "${options[@]}" -P "$port" scripts/android-signing-vault.mjs "$host:$stage/scripts/android-signing-vault.mjs"
+ scp "${options[@]}" -P "$port" server/android-download.mjs "$host:$stage/server/android-download.mjs"
+ scp "${options[@]}" -P "$port" scripts/publish-android-apk.mjs "$host:$stage/scripts/publish-android-apk.mjs"
+ ssh "${options[@]}" -p "$port" "$host" "chmod 0600 '$stage/scripts/'* '$stage/server/'*; node '$stage/scripts/publish-android-apk.mjs' '$stage' '$GITHUB_SHA'"
 fi

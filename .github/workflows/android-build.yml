@@ -43,6 +43,7 @@ jobs:
           install -D -m 0644 tests/native-android/SharedUiSmokeTest.java android/app/src/androidTest/java/ru/poputi/app/SharedUiSmokeTest.java
           install -D -m 0644 tests/native-android/PushPolicyTest.java android/app/src/test/java/ru/poputi/app/PushPolicyTest.java
           install -D -m 0644 tests/native-android/SearchDateTest.java android/app/src/test/java/ru/poputi/app/SearchDateTest.java
+          install -D -m 0644 tests/native-android/UpdatePolicyTest.java android/app/src/test/java/ru/poputi/app/UpdatePolicyTest.java
           npx cap sync android
           test -e android/app/src/main/assets/public/config.js
           grep -Fq "https://vputipoputka.ru" android/app/src/main/assets/public/config.js
