@@ -1,0 +1,72 @@
+name: Configure public privacy operator
+on:
+  workflow_dispatch:
+    inputs:
+      operator:
+        description: 'Public operator name approved by the owner'
+        required: true
+        type: string
+      contact_email:
+        description: 'Public contact email for the privacy policy'
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: po-puti-production
+  cancel-in-progress: false
+jobs:
+  verify:
+    uses: ./.github/workflows/verify.yml
+  configure:
+    needs: verify
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    environment: production
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - name: Install only the provided public operator and contact
+        env:
+          DEPLOY_HOST: ${{ secrets.POPUTI_DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.POPUTI_DEPLOY_USER }}
+          DEPLOY_KEY: ${{ secrets.POPUTI_DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.POPUTI_DEPLOY_KNOWN_HOSTS }}
+          DEPLOY_PORT: ${{ secrets.POPUTI_DEPLOY_PORT }}
+          PUBLIC_OPERATOR: ${{ inputs.operator }}
+          PUBLIC_CONTACT_EMAIL: ${{ inputs.contact_email }}
+        run: |
+          set -euo pipefail
+          umask 077
+          ssh_dir="$RUNNER_TEMP/privacy-ssh"
+          trap 'rm -rf "$ssh_dir"' EXIT
+          bash deploy/prepare-ssh.sh "$ssh_dir"
+          test "$DEPLOY_USER" = root
+          [[ "$GITHUB_RUN_ID" =~ ^[0-9]+$ && "$GITHUB_RUN_ATTEMPT" =~ ^[0-9]+$ ]]
+          node --input-type=module - "$ssh_dir/input.json" <<'JS'
+          import {writeFileSync} from 'node:fs';
+          import {privacyPayload} from './deploy/install-public-privacy.mjs';
+          const value=privacyPayload({operator:process.env.PUBLIC_OPERATOR,contactEmail:process.env.PUBLIC_CONTACT_EMAIL});
+          writeFileSync(process.argv[2],JSON.stringify(value),{mode:0o600,flag:'wx'});
+          JS
+          stage="/var/lib/po-puti-privacy-setup/run-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          port="${DEPLOY_PORT:-22}"
+          options=(-i "$ssh_dir/key" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$ssh_dir/known_hosts" -o ConnectTimeout=12)
+          host="$DEPLOY_USER@$DEPLOY_HOST"
+          ssh "${options[@]}" -p "$port" "$host" "install -d -m 0700 '$stage'"
+          scp "${options[@]}" -P "$port" deploy/install-public-privacy.mjs "$host:$stage/install-public-privacy.mjs"
+          ssh "${options[@]}" -p "$port" "$host" "chmod 0600 '$stage/install-public-privacy.mjs'; node '$stage/install-public-privacy.mjs'" < "$ssh_dir/input.json"
+      - name: Verify the provided public values over HTTPS
+        env:
+          PUBLIC_OPERATOR: ${{ inputs.operator }}
+          PUBLIC_CONTACT_EMAIL: ${{ inputs.contact_email }}
+        run: |
+          node --input-type=module <<'JS'
+          const response=await fetch('https://vputipoputka.ru/api/public-config',{signal:AbortSignal.timeout(15000),cache:'no-store'});
+          const result=await response.json();
+          if(!response.ok||result.privacy?.operator!==process.env.PUBLIC_OPERATOR.trim()||result.privacy?.contact!==process.env.PUBLIC_CONTACT_EMAIL.trim())throw Error('Public privacy settings verification failed');
+          console.log('PUBLIC_PRIVACY_HTTPS_OK: operator and contact match owner input; service terms and user data untouched');
+          JS

@@ -16,7 +16,7 @@ import {normalizePhoto} from './media.mjs';
 import {migrateFeatures} from './migrations-v5.mjs';
 import {rideSeries} from './ride-series.mjs';
 import {safeTicketUrl,prepareTimetableCache,timetables} from './timetables.mjs';
-import {clientConfig} from './client-config.mjs';
+import {clientConfig,renderPrivacyDocument} from './client-config.mjs';
 import {serveAndroidApk} from './android-download.mjs';
 import {adminMfa} from './admin-mfa.mjs';
 import {accountPrivacy} from './account-privacy.mjs';
@@ -423,7 +423,8 @@ async function serveStatic(req,res,pathname){
    throw jsonError('Файл не найден',404);
  }
  const mime={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.json':'application/json','.webmanifest':'application/manifest+json','.svg':'image/svg+xml','.png':'image/png'};
- const body=await readFile(file);
+ let body=await readFile(file);
+ if(file===join(WEB,'privacy.html'))body=Buffer.from(renderPrivacyDocument(body.toString('utf8')));
  if(file===join(WEB,'index.html')){
   const inline=body.toString('utf8').match(/<script>([\s\S]*?)<\/script>/)?.[1];
   const hash=crypto.createHash('sha256').update(inline||'').digest('base64');

@@ -73,6 +73,21 @@ public class SignedReleaseFlowTest {
         if(view instanceof ViewGroup)for(int i=0;i<((ViewGroup)view).getChildCount();i++){Button result=button(((ViewGroup)view).getChildAt(i),text);if(result!=null)return result;}
         return null;
     }
+    private static void awaitNativeSearch(ActivityScenario<MainActivity> scenario) throws Exception {
+        // JS sets nativeSearchVisible before the asynchronous bridge has attached
+        // the Android view. Wait for the actual visible form, not just that flag.
+        long until=System.currentTimeMillis()+45000;
+        while(System.currentTimeMillis()<until){
+            AtomicReference<Boolean> ready=new AtomicReference<>(false);
+            scenario.onActivity(activity->{
+                View root=activity.findViewById(android.R.id.content).findViewWithTag("po-puti-native-search");
+                ready.set(root!=null&&root.isShown()&&input(root,"Откуда")!=null&&input(root,"Куда")!=null&&input(root,"Выберите дату")!=null&&button(root,"Найти поездку")!=null);
+            });
+            if(ready.get())return;
+            Thread.sleep(100);
+        }
+        fail("Native search form must become visible and interactive");
+    }
     @Test public void signedReleaseInstallsLaunchesLogsInAndSearchesProduction() throws Exception {
         android.content.Context context=InstrumentationRegistry.getInstrumentation().getTargetContext();
         assertEquals("ru.poputi.app",context.getPackageName());
@@ -96,6 +111,7 @@ public class SignedReleaseFlowTest {
             await(scenario,"!!db.currentUserId&&db.currentUserId==="+JSONObject.quote(testUserId),"Actual production login must succeed");
             scenario.onActivity(activity->activity.getBridge().getWebView().removeJavascriptInterface("__PoPutiReleaseTestCredentials"));
             await(scenario,"typeof nativeSearchVisible!=='undefined'&&nativeSearchVisible===true","Native Android search must open after login");
+            awaitNativeSearch(scenario);
             evaluate(scenario,"(()=>{window.__releaseSearchSucceeded=false;const original=window.fetch;window.fetch=async function(input,options){const response=await original.call(this,input,options);const u=new URL(typeof input==='string'?input:input.url,location.href);if(u.pathname==='/api/search'&&u.searchParams.get('type')==='private'&&u.searchParams.get('from')==='Москва'&&u.searchParams.get('to')==='Тверь'){const data=await response.clone().json();window.__releaseSearchSucceeded=response.ok&&Array.isArray(data.private?.items);}return response};return true})()");
             String date=LocalDate.now().plusDays(2).toString();
             scenario.onActivity(activity->{
